@@ -107,9 +107,12 @@ dist/
 ### 本次发布物
 
 ```
-dist/win-admin-1.0.0.tar.gz        117,729 B  bd4343ec8d9f0777e99afd9fbc03603fbccd32bda320aea0bff0b9a7cac9570b
+dist/win-admin-1.0.0.tar.gz        120,742 B  61f03ed3e95edbbf3ea8697c413766a217539591b73326670e30315d7fa6e968
 dist/win-admin-win-1.0.0.zip        13,901 B  a1efc2cb76c22878d5b37262597cbdc884f3be81048f0825e07633bc3da93724
 ```
+
+> 2026-10-21T01:38 重冻结：K34/K35 两个测试缺陷修复后重新 `build-release`（P1 由 117,729 B 变为 120,742 B，P2 未变——载荷一行没动），`v1.0.0` 标签随之指到新 HEAD。
+> 版本号不变：能力面零改动，改的是验收脚本与文档。`dist/` 不入库，SHA256 以本节为准。
 
 P1 是完整仓库快照（文档 + bash 原语 + 测试）；P2 是 Windows 侧 9 个 `.ps1` 载荷，供不想跑
 `bootstrap.sh` 的人手工铺到 `C:/Users/Public/win-admin/app/1.0.0/` 并把 `current.txt` 指过去。
