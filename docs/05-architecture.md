@@ -193,3 +193,22 @@ agent 汇报："已导出到 C:\...\x.csv"，附两张截图路径
 | MCP server 形态 | 多一层协议，收益仅是"看起来标准"；纯 CLI JSON 已足够 |
 | 视觉坐标系（以截图像素为准） | DPI 一变全歪；语义优先，像素兜底 |
 | 跨机器远程接管 | 超出"接管我这台 PC"的需求，且安全面爆炸 |
+
+## 10. M4 落地形态（2026-10-21 实现）
+
+`ops/` 四件与 `SKILL.md` 已按 §6/§7 的契约落地，实际形态与本设计一致的部分：
+
+| 契约 | 实现 |
+|---|---|
+| 单 JSON 到 stdout，诊断到 stderr | 全部 ops 一致；`jq` 直接消费 |
+| 退出码 0/2/3/4/5 | `lib-ops.sh:wa_exit_for` + 各脚本显式 code |
+| 默认 dry-run | `ops/open|fill|find-and-click` 无 `--yes` 只输出计划（含 point/node） |
+| 全部过 guard | `op_pause_gate input|write` 在每个真实动作前调用 |
+| 全部写审计 | `wa_audit_init ops-<name>` + `WA_AUDIT_RESULT` |
+| 先证后动 | 点击前 `wwin focus`；注入后 UIA 读回（fill.matches）或落盘检查 |
+
+与原设计的三处偏差：
+
+1. **新增 `win/waopen.ps1`**：启动程序并等窗口这件事放进 PowerShell 一次完成（避免 bash 轮询 + 多次 700ms 桥调用）。
+2. **`wwin` 扩了 focus/close**：不是原计划的独立原语，但两者都不产生合成输入，属于"窗口管理层"，放 `wwin` 更内聚。
+3. **L4 从"计划"变成"已安装"**：`SKILL.md` + `scripts/install-skill.sh`，安装到 `~/.dsh/skills/win-admin` 后立即进入会话技能目录（实测）。
