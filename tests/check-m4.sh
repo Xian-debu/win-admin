@@ -23,6 +23,7 @@ cleanup() {
   for h in $OPENED; do bash bin/wwin close --hwnd "$h" >/dev/null 2>&1 || true; done
   if [ "$HAD_GRANT" = "1" ] && [ -f "$GB" ]; then mv -f "$GB" "$GH"; fi
   if [ "$CREATED_GRANT" = "1" ]; then bash guard/grant.sh revoke >/dev/null 2>&1 || true; rm -f "$GH"; fi
+  rm -f "$STATE_DIR/grant.json.m4-n1"
 }
 trap cleanup EXIT
 
@@ -63,12 +64,13 @@ fi
 
 # ------------------------------------------------------------------ guard / arg negatives
 say "N1 no grant -> ops/open exit 4, no window"
-mv -f "$GH" "$GB" 2>/dev/null || true
+GN="$STATE_DIR/grant.json.m4-n1"   # park our own grant here; must NOT share the $GB cleanup slot (K35)
+mv -f "$GH" "$GN" 2>/dev/null || true
 if [ -f "$GH" ]; then rm -f "$GH"; fi
 OUT="$(bash ops/open --exe notepad --args "C:\\Users\\Public\\win-admin\\tmp\\m4-guard.txt" --title "m4-guard" --timeout 3 --yes 2>&1)"; RC=$?
 CODE="$(printf "%s" "$OUT" | jq -r '.code // empty' 2>/dev/null)"
 WINS="$(bash bin/wwin list | jq -r --arg t "m4-guard" '[.windows[] | select(.title | test($t))] | length')"
-if [ "$HAD_GRANT" = "1" ] && [ -f "$GB" ]; then mv -f "$GB" "$GH"; fi
+if [ -f "$GN" ]; then mv -f "$GN" "$GH"; fi   # restore unconditionally (own grant or inherited)
 if [ "$RC" = "4" ] && [ "$CODE" = "GUARD_NO_GRANT" ] && [ "$WINS" = "0" ]; then
   ok "N1 rc=4 GUARD_NO_GRANT, windows opened=0"
 else

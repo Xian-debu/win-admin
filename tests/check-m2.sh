@@ -19,7 +19,8 @@ TEXT="$WIN/tmp/testwin-text.txt"
 HAD_GRANT=0
 cleanup() {
   bash tests/helpers/testwin-stop.sh >/dev/null 2>&1
-  if [ "$HAD_GRANT" = "1" ]; then [ -f "$GBK" ] && mv "$GBK" "$G"; else rm -f "$G"; fi
+  # Restore the pre-run grant if we saved one; otherwise make sure OUR grant does not survive (E5, K34).
+  if [ -f "$GBK" ]; then mv -f "$GBK" "$G"; else rm -f "$G"; fi
   rm -f "$STATE_DIR/testwin.pid" "$STATE_DIR/testwin.pid.tmp"
 }
 trap cleanup EXIT

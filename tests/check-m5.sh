@@ -33,6 +33,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# E5 no residue: remember whether a grant was valid BEFORE any suite ran (K34)
+bash guard/grant.sh status >/dev/null 2>&1
+PRE_GRANT="$(bash guard/grant.sh status 2>/dev/null | jq -r '.valid' 2>/dev/null)"
+[ "$PRE_GRANT" = "true" ] || PRE_GRANT=false
+
 say "payload"
 if ! bash scripts/bootstrap.sh --force >/dev/null 2>&1; then
   echo "FATAL: bootstrap failed"; exit 1
@@ -67,6 +72,15 @@ case "$(bash scripts/check-release.sh 2>&1 | grep -E '^SUMMARY' | tail -1)" in
   *) bad "check-release: $(bash scripts/check-release.sh 2>&1 | grep -E '^FAIL|^SUMMARY' | head -3 | tr '\n' ' ')" ;;
 esac
 
+fi
+
+# E5: suites must not leave a live grant behind when there was none before
+POST_GRANT="$(bash guard/grant.sh status 2>/dev/null | jq -r '.valid' 2>/dev/null)"
+if [ "$PRE_GRANT" != "true" ] && [ "$POST_GRANT" = "true" ]; then
+  bad "E5 residue: suites left a valid grant behind ($(bash guard/grant.sh status 2>/dev/null | jq -r '.note // "?"'))"
+  bash guard/grant.sh revoke >/dev/null 2>&1
+elif [ "$PRE_GRANT" != "true" ]; then
+  ok "E5 no residue: no grant left behind by the suites"
 fi
 
 # ---------------------------------------------------------------- part B: E8 ten rounds
