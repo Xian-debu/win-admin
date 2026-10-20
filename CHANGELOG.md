@@ -3,6 +3,25 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [0.3.0] - 2026-10-21
+
+### Added
+- 复合操作层 `ops/`：`open`（启动并等窗口）、`find-and-click`（UIA 语义定位 + 点击中心）、
+  `fill`（点击 + 全选 + 粘贴 + UIA 读回校验）、`wait-for`（等窗口或等 UIA 控件）。
+  全部默认 dry-run，`--yes` 才注入；全部过 guard 并写审计。
+- `win/waopen.ps1`：启动程序并等窗口（进程 pid 或标题匹配），单次桥调用完成。
+- `wwin focus`（双线程 attach 抢前台，不产生合成输入）/ `wwin close`（PostMessage WM_CLOSE，脏文档交给应用）。
+- `SKILL.md`（L4 技能：红线 / 授权 / 原语表 / 五步配方 / 坑表 / 拒绝条件）+ `scripts/install-skill.sh`。
+- 验收 `tests/check-m4.sh`（13 项：N1-N6 阴性 + C8-1…C8-6 + E8 三连跑），报告 `tests/reports/2026-10-21-m4.md`。
+
+### Fixed
+- `jq --argjson` 不接受 `0x` hwnd（K25）；`$(op_resolve_hwnd)` 吞掉错误 JSON（K26）；
+  `waopen.ps1` 缺 `Fail` 导致无 JSON 输出（补本地 Fail + trap，坏程序现在 `ENV_NO_EXE` rc3）。
+
+### Measured
+- `ops/open` 564 ms 返回 hwnd；`ops/wait-for --uia-name` 606 ms 命中；
+- `ops/fill` 48 字节中文+emoji 读回逐字节一致；端到端（含落盘与关窗）8.2–9.0 s，3/3 连过。
+
 ## [0.2.0] - 2026-10-21
 
 ### Added
@@ -17,26 +36,3 @@
 - `Out-Plan | Out-Null` 吞掉 dry-run JSON（K15）；`-split '+'` 的正则转义错误；
 - 事件处理器看不到外层局部变量（改 `$script:`，K16）；`$env:WA_VERSION` 设置顺序导致错误 JSON 报 unknown；
 - guard 拒绝路径绕过审计（K20）。
-
-### Notes
-- 输入注入代码只允许存在于 `bin/winput` + `win/winput.ps1`（D14 静态守护）。
-- 单次原语经 winps 桥约 600–750 ms；真实任务需要 M4 的复合操作。
-## [0.1.0] - 2026-10-21
-
-### Added
-- 双包部署工程：WSL 侧 P1（`bin/ guard/ lib/ tests/`）+ Windows 侧载荷 P2（`win/`），
-  P2 装到 `C:/Users/Public/win-admin/app/<version>/`，用 `current.txt` 指针切换版本。
-- `scripts/bootstrap.sh`（体检 → 拷贝 → 哈希校验 → 写指针 → 冒烟）、
-  `scripts/rollback.sh`、`scripts/uninstall.sh`、`scripts/build-release.sh`。
-- M1 只读原语：`wdiag`、`wshot`、`wuia`、`wwin list`；共享库 `lib/common.sh`、`win/lib/wa-core.ps1`。
-- `tests/check-m1.sh` 与 `tests/reports/2026-10-21-m1.md`。
-
-### Notes
-- 本版本不包含任何输入注入代码（D14）：`winput` 在 M1 验收通过后才出现。
-- Windows 侧无安装器、无常驻进程、无第三方依赖，卸载 = 删目录。
-
-## [0.0.1] - 2026-10-20
-
-### Added
-- 工程骨架与九份文档（目的、环境、插件审计、能力矩阵、架构、决策、验收、规范、路线图）。
-- 环境实测探针 `inventory/scripts/probe-env.sh` 与两份原始记录。
