@@ -1,6 +1,6 @@
 # win-admin · 让 WSL 里的 DSH 在授权窗口内操作 Windows 桌面
 
-> **当前状态：M3 已完成（2026-10-21）。可截图、读控件树、点、打、拖、等；输入默认拒绝、默认 dry-run；每个动作都记账，令牌带签名，锁屏/UAC 直接拒绝。下一步 M4（复合操作 + 技能）。**
+> **当前状态：M4 已完成（2026-10-21）。能用 `ops/` 一次完成「开程序 → 找控件 → 点/填 → 读回验证」，端到端 13/0 绿（单轮 8.2–9.0 s）；`SKILL.md` 已可一键安装成 agent 技能。下一步 M5（全表回归 + 冻结 v1.0）。**
 >
 > 一句话：不是"给 agent 开个后门"，而是**一套带刹车、带行车记录仪、见过反例的工具箱**。
 
@@ -73,7 +73,7 @@ win-admin/
 | 会话 | `SessionId=1`，explorer 在 session 1 | 有真实交互桌面可操作 |
 | 视觉通道 | ✅ 可读 2560×1600 截图中的 UI 文字 | L4 语义成立，可"看全局"，但不用于判 2px 对齐 |
 
-## 现在能用什么（M2 阶段）
+## 现在能用什么（M4 阶段）
 
 ```bash
 # 0) 安装 Windows 侧载荷到 C:/Users/Public/win-admin/app/<version>/（幂等）
@@ -99,19 +99,31 @@ bash bin/wuia --hwnd 0x108c6 --value | jq -r .value                            #
 bash bin/wclip get                                                             # 剪贴板
 bash guard/grant.sh revoke                                                     # 撤销
 
-# 5) 验收（M1 17 项 / M2 11 项 / M3 20 项，全绿才算过）
+# 5) 组合操作（默认 dry-run；--yes 才真动手；全部过 guard + 写审计）
+bash ops/open      --exe notepad --args "C:/Users/Public/win-admin/tmp/a.txt" --title a.txt --yes
+bash ops/find-and-click --hwnd 0x108c6 --name "^保存$" --type Button --yes
+bash ops/fill      --hwnd 0x108c6 --name "文本编辑器" --text "中文 ok" --yes
+bash ops/wait-for  --hwnd 0x108c6 --uia-name "^是否要将更改保存" --timeout 5
+bash bin/wwin focus --hwnd 0x108c6     # 激活（不产生合成输入）
+bash bin/wwin close --hwnd 0x108c6     # 优雅关闭（脏文档交给应用问）
+
+# 6) 把 SKILL.md 装成 agent 技能（装到 ~/.dsh/skills/win-admin）
+bash scripts/install-skill.sh          # --remove 卸载
+
+# 7) 验收（M1 17 / M2 11 / M3 20 / M4 13，全绿才算过）
 bash tests/check-m1.sh
 bash tests/check-m2.sh
 bash tests/check-m3.sh
+bash tests/check-m4.sh
 
-# 6) 部署工程自检 / 回退 / 卸载
+# 8) 部署工程自检 / 回退 / 卸载
 bash scripts/check-release.sh
 bash scripts/rollback.sh --list
 bash scripts/uninstall.sh --yes
 ```
 
 注入代码现在**只允许存在于 `winput`**（`bin/winput` + `win/winput.ps1`），由 `scripts/check-release.sh` 第 4 项静态检查守护（`docs/06` D14 随里程碑演进）。
-单次原语经 winps 桥约 600–750 ms——真实任务要靠 M4 的复合操作把多次动作压进一次会话，而不是循环调用原语。
+单次原语经 winps 桥约 600–750 ms——真实任务用 `ops/` 把多次动作压进一次会话（实测「开记事本→写中文→另存」8.2–9.0 s），而不是让 agent 一步步调原语。
 
 ## 路线图（详见 `docs/09`）
 
@@ -122,7 +134,7 @@ bash scripts/uninstall.sh --yes
 | M1 ✅ | 只读：`wshot` `wuia` `wwin list` `wdiag` | E1–E7, C1–C3（17/0 绿） | 2026-10-21 |
 | M2 ✅ | 输入：`winput` `wclip` `wwait` `wwin info` | C4–C7, S7（11/0 绿） | 2026-10-21 |
 | M3 ✅ | 守卫：令牌签名 / 软急停 / 审计账本 / 锁屏与 UAC 拒绝 | S1–S8（20/0 绿） | 2026-10-21 |
-| M4 | 组合操作 + `SKILL.md` + 端到端 | C8, E8 | 5–8h |
+| M4 ✅ | 组合操作 + `SKILL.md` + 端到端 | C8, E8（13/0 绿，E8 3/3） | 2026-10-21 |
 | M5 | 稳定化与冻结 | 全表回归 | 2–3h |
 
 ## 需要用户点头的事
