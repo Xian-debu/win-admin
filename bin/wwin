@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/wwin - window inventory. M1 supports: list.
+# bin/wwin - window inventory: list (all visible top-level windows) or info (one hwnd's rect/state).
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
@@ -8,13 +8,26 @@ case "$sub" in
   -h|--help|help)
     cat <<'EOF'
 usage: wwin list
-  Lists visible top-level windows (hwnd, title, class, pid, process, rect).
-  exit 0 ok | 2 arg | 5 exec failure
+       wwin info --hwnd 0x1234
+  Lists visible top-level windows (hwnd, title, class, pid, process, rect) or one window's state.
+  exit 0 ok | 2 arg | 3 ENV_NO_WINDOW | 5 exec failure
 EOF
     exit 0 ;;
-  list) ;;
-  *) echo "unsupported action: $sub (M1 supports list only)" >&2; exit 2 ;;
+  list)
+    shift || true
+    raw="$(wa_run wwin -Action list)"
+    wa_finish "$raw" ;;
+  info)
+    shift || true
+    H=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --hwnd) H="$2"; shift 2 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$H" ] || { echo "info needs --hwnd" >&2; exit 2; }
+    raw="$(wa_run wwin -Action info -Hwnd "$((H))")"
+    wa_finish "$raw" ;;
+  *) echo "unsupported action: $sub (list|info)" >&2; exit 2 ;;
 esac
-
-raw="$(wa_run wwin -Action list)"
-wa_finish "$raw"

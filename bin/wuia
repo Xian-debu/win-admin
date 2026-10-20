@@ -3,13 +3,14 @@
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
-LIST=0; HWND=""; TITLE=""; DEPTH=3; MAX=400; FILTER=""
+LIST=0; HWND=""; TITLE=""; DEPTH=3; MAX=400; FILTER=""; VALUE=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)
       cat <<'EOF'
 usage: wuia --list
        wuia (--hwnd 0x1234 | --title REGEX) [--depth N] [--max N] [--filter REGEX]
+       wuia (--hwnd 0x1234 | --title REGEX) --value   # read the first ValuePattern value (C5 readback)
   Bounded: depth default 3, max nodes default 400. Rect is physical pixels.
   exit 0 ok | 2 arg | 3 ENV_NO_WINDOW | 5 exec failure
 EOF
@@ -20,6 +21,7 @@ EOF
     --depth) DEPTH="$2"; shift 2 ;;
     --max) MAX="$2"; shift 2 ;;
     --filter) FILTER="$2"; shift 2 ;;
+    --value) VALUE=1; shift ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
@@ -29,6 +31,7 @@ if [ "$LIST" = 1 ]; then args+=(-List); fi
 if [ -n "$HWND" ]; then args+=(-Hwnd "$((HWND))"); fi
 if [ -n "$TITLE" ]; then args+=(-Title "$TITLE"); fi
 if [ -n "$FILTER" ]; then args+=(-Filter "$FILTER"); fi
+if [ "$VALUE" = 1 ]; then args+=(-Value); fi
 
 raw="$(wa_run "${args[@]}")"
 wa_finish "$raw"

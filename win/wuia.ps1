@@ -6,7 +6,8 @@ param(
     [int]$Depth = 3,
     [int]$MaxNodes = 400,
     [string]$Filter = '',
-    [string]$Title = ''
+    [string]$Title = '',
+    [switch]$Value
 )
 $env:WA_VERSION = $Version
 if (-not $Core) { $Core = Join-Path $PSScriptRoot 'lib/wa-core.ps1' }
@@ -63,6 +64,52 @@ try {
         Write-WaFail 'ENV_NO_WINDOW' "no UIA element for hwnd $Hwnd"
         exit 3
     }
+    if ($Value) {
+        # C5 readback oracle: first element under the target that supports ValuePattern (edit/document controls).
+        $script:found = $null
+        $script:val = ''
+        $script:how = ''
+        $script:seen = 0
+        function Scan-WaValue($e, $d) {
+            if ($script:found -or $script:seen -ge 2000) { return }
+            $script:seen = $script:seen + 1
+            try {
+                $vp = $e.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)
+                if ($vp) { $script:found = $e; $script:val = $vp.Current.Value; $script:how = 'value'; return }
+            } catch { }
+            try {
+                $tp = $e.GetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern)
+                if ($tp) { $script:found = $e; $script:val = $tp.DocumentRange.GetText(-1); $script:how = 'text'; return }
+            } catch { }
+            if ($d -ge 8) { return }
+            $w2 = [System.Windows.Automation.TreeWalker]::RawViewWalker
+            $c = $w2.GetFirstChild($e)
+            while ($c) {
+                Scan-WaValue $c ($d + 1)
+                if ($script:found) { return }
+                $c = $w2.GetNextSibling($c)
+            }
+        }
+        Scan-WaValue $el 0
+        if (-not $script:found) {
+            Write-WaFail 'ENV_NO_VALUE_PATTERN' 'no element under the target supports ValuePattern'
+            exit 3
+        }
+        $v = $script:found.Current
+        Out-WaJson ([ordered]@{
+            ok      = $true
+            mode    = 'value'
+            hwnd    = ('0x{0:x}' -f $Hwnd)
+            name    = $v.Name
+            type    = $v.ControlType.ProgrammaticName
+            aid     = $v.AutomationId
+            via     = $script:how
+            value   = $script:val
+            len     = $script:val.Length
+        })
+        exit 0
+    }
+
     $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
     $script:nodes = New-Object System.Collections.ArrayList
     $script:truncated = $false
