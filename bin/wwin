@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# bin/wwin - window inventory: list (all visible top-level windows) or info (one hwnd's rect/state).
+# bin/wwin - window inventory: list (all visible top-level windows), info (one hwnd), focus (bring to front, no input injection).
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
@@ -9,8 +9,12 @@ case "$sub" in
     cat <<'EOF'
 usage: wwin list
        wwin info --hwnd 0x1234
-  Lists visible top-level windows (hwnd, title, class, pid, process, rect) or one window's state.
-  exit 0 ok | 2 arg | 3 ENV_NO_WINDOW | 5 exec failure
+       wwin focus --hwnd 0x1234
+       wwin close --hwnd 0x1234
+  Lists visible top-level windows (hwnd, title, class, pid, process, rect), one window's state,
+  brings a window to the foreground without synthetic input,
+  or posts a graceful WM_CLOSE (the app decides; a dirty document may prompt).
+  exit 0 ok | 2 arg | 3 ENV_NO_WINDOW / ENV_NOT_FOREGROUND | 5 exec failure
 EOF
     exit 0 ;;
   list)
@@ -29,5 +33,29 @@ EOF
     [ -n "$H" ] || { echo "info needs --hwnd" >&2; exit 2; }
     raw="$(wa_run wwin -Action info -Hwnd "$((H))")"
     wa_finish "$raw" ;;
-  *) echo "unsupported action: $sub (list|info)" >&2; exit 2 ;;
+  focus)
+    shift || true
+    H=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --hwnd) H="$2"; shift 2 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$H" ] || { echo "focus needs --hwnd" >&2; exit 2; }
+    raw="$(wa_run wwin -Action focus -Hwnd "$((H))")"
+    wa_finish "$raw" ;;
+  close)
+    shift || true
+    H=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --hwnd) H="$2"; shift 2 ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+      esac
+    done
+    [ -n "$H" ] || { echo "close needs --hwnd" >&2; exit 2; }
+    raw="$(wa_run wwin -Action close -Hwnd "$((H))")"
+    wa_finish "$raw" ;;
+  *) echo "unsupported action: $sub (list|info|focus|close)" >&2; exit 2 ;;
 esac

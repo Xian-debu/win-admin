@@ -18,8 +18,40 @@ try {
         Out-WaJson ([ordered]@{ ok = $true; action = 'info'; window = $w; at = (Get-Date).ToUniversalTime().ToString('o') })
         exit 0
     }
+    if ($Action -eq 'focus') {
+        if (-not $Hwnd) {
+            Write-WaFail 'ARG_NEED_TARGET' 'focus needs -Hwnd'
+            exit 2
+        }
+        if (-not [Wa.Native]::IsWindow([IntPtr]$Hwnd)) {
+            Write-WaFail 'ENV_NO_WINDOW' "not a window handle: $Hwnd"
+            exit 3
+        }
+        if (-not (Set-WaForeground ([IntPtr]$Hwnd))) {
+            Write-WaFail 'ENV_NOT_FOREGROUND' "could not bring hwnd $Hwnd to the foreground"
+            exit 3
+        }
+        $w = Get-WaWindowInfo ([IntPtr]$Hwnd)
+        Out-WaJson ([ordered]@{ ok = $true; action = 'focus'; foreground = $true; window = $w; at = (Get-Date).ToUniversalTime().ToString('o') })
+        exit 0
+    }
+    if ($Action -eq 'close') {
+        if (-not $Hwnd) {
+            Write-WaFail 'ARG_NEED_TARGET' 'close needs -Hwnd'
+            exit 2
+        }
+        if (-not [Wa.Native]::IsWindow([IntPtr]$Hwnd)) {
+            Write-WaFail 'ENV_NO_WINDOW' "not a window handle: $Hwnd"
+            exit 3
+        }
+        # WM_CLOSE: graceful request; the app decides (a modified document shows its own save prompt).
+        [void][Wa.Native]::PostMessage([IntPtr]$Hwnd, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero)
+        $w = Get-WaWindowInfo ([IntPtr]$Hwnd)
+        Out-WaJson ([ordered]@{ ok = $true; action = 'close'; requested = $true; window = $w; at = (Get-Date).ToUniversalTime().ToString('o') })
+        exit 0
+    }
     if ($Action -ne 'list') {
-        Write-WaFail 'ARG_BAD_ACTION' "unsupported action: $Action (list|info)"
+        Write-WaFail 'ARG_BAD_ACTION' "unsupported action: $Action (list|info|focus)"
         exit 2
     }
     $wins = Get-WaTopWindows

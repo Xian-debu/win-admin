@@ -33,6 +33,12 @@ if (-not ('Wa.Native' -as [type])) {
 public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
 public delegate bool EnumProc(IntPtr h, IntPtr p);
 [DllImport("user32.dll")] public static extern bool EnumWindows(EnumProc cb, IntPtr p);
+[DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int n);
+[DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
+[DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
+[DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
+[DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
+[DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
 '@
 }
 
@@ -142,6 +148,36 @@ function Get-WaWindowInfo([IntPtr]$h) {
         minimized = [Wa.Native]::IsIconic($h)
         rect      = [ordered]@{ x = $r.Left; y = $r.Top; w = ($r.Right - $r.Left); h = ($r.Bottom - $r.Top) }
     }
+}
+
+# Foreground activation without synthetic input. Windows blocks SetForegroundWindow from a
+# background process; attaching our input queue to BOTH the target window's thread and the
+# current foreground thread lifts that restriction (measured 2026-10-21, M4).
+function Set-WaForeground([IntPtr]$h) {
+    [void][Wa.Native]::ShowWindow($h, 9)
+    [void][Wa.Native]::BringWindowToTop($h)
+    if ([Wa.Native]::GetForegroundWindow() -eq $h) { return $true }
+    [void][Wa.Native]::SetForegroundWindow($h)
+    if ([Wa.Native]::GetForegroundWindow() -eq $h) { return $true }
+    $pid0 = [uint32]0
+    $fg = [Wa.Native]::GetForegroundWindow()
+    $fgThread = [Wa.Native]::GetWindowThreadProcessId($fg, [ref]$pid0)
+    $targetThread = [Wa.Native]::GetWindowThreadProcessId($h, [ref]$pid0)
+    $myThread = [Wa.Native]::GetCurrentThreadId()
+    $attached = @()
+    foreach ($t in @($fgThread, $targetThread)) {
+        if ($t -ne 0 -and $t -ne $myThread) {
+            if ([Wa.Native]::AttachThreadInput($myThread, $t, $true)) { $attached += $t }
+        }
+    }
+    [void][Wa.Native]::SetForegroundWindow($h)
+    [void][Wa.Native]::BringWindowToTop($h)
+    foreach ($t in $attached) { [void][Wa.Native]::AttachThreadInput($myThread, $t, $false) }
+    for ($i = 0; $i -lt 20; $i++) {
+        if ([Wa.Native]::GetForegroundWindow() -eq $h) { return $true }
+        Start-Sleep -Milliseconds 50
+    }
+    return $false
 }
 
 function Get-WaTopWindows {
