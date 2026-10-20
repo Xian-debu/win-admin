@@ -1,0 +1,20 @@
+# 运行产物（概不外传）
+*.log
+*.tmp
+*.png
+*.jpg
+!docs/images/*.png
+!inventory/raw/fixtures/*.png
+
+# 运行时状态（授权令牌 / 审计 / 急停标志）
+run/
+*.audit.jsonl
+pause.flag
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# 本地探针临时物
+inventory/raw/tmp/
