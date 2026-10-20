@@ -94,10 +94,22 @@ dist/
 
 > P2 **不入库、不进备份**：它随时可以由 P1 重建。备份只需备份仓库 + 审计/授权目录 `~/.dsh/win-admin/`。
 
-## 8. 发布清单（M6）
+## 8. 发布清单（v1.0.0 实测记录 2026-10-21）
 
-- [ ] `tests/check-m1.sh`（及当时的全部判据）全绿
-- [ ] `scripts/check-release.sh` 退出 0
-- [ ] `VERSION`、`CHANGELOG` 首条、git tag 三者一致
-- [ ] 干净目录复演：clone → bootstrap → 冒烟 → 回滚 → 卸载
-- [ ] 报告写入 `tests/reports/` 并在 Release 说明里链接
+- [x] 全部判据全绿：`bash tests/check-m5.sh` → m1 17/0、m2 11/0、m3 20/0、m4 13/0、release yes、E8 10/10
+- [x] `scripts/check-release.sh` 退出 0（`SUMMARY pass=yes`）
+- [x] `VERSION` = `CHANGELOG` 首条 = `v1.0.0`（check-release 第 1 项守护）
+- [x] 干净目录复演（**用发布物本身，不用仓库**）：
+      `tar -xzf dist/win-admin-1.0.0.tar.gz -C /tmp/pkg-verify` → `bootstrap.sh --force`（SMOKE PASS，version=1.0.0）
+      → `tests/check-m1.sh` **17/0**（skip 14）→ `check-release.sh` **pass=yes**，共 73 个文件
+- [x] 报告：`tests/reports/2026-10-21-m5.md`
+
+### 本次发布物
+
+```
+dist/win-admin-1.0.0.tar.gz        117,729 B  bd4343ec8d9f0777e99afd9fbc03603fbccd32bda320aea0bff0b9a7cac9570b
+dist/win-admin-win-1.0.0.zip        13,901 B  a1efc2cb76c22878d5b37262597cbdc884f3be81048f0825e07633bc3da93724
+```
+
+P1 是完整仓库快照（文档 + bash 原语 + 测试）；P2 是 Windows 侧 9 个 `.ps1` 载荷，供不想跑
+`bootstrap.sh` 的人手工铺到 `C:/Users/Public/win-admin/app/1.0.0/` 并把 `current.txt` 指过去。
