@@ -165,6 +165,30 @@
 - **依据**：误编辑、脚本事故、旧版无签名 grant 都会被静默接受，是真实风险；签名把这些变成显式错误。
 - **不夸大**：同一 Linux 用户下的进程能读 key，所以签名**不是**权限边界。真正的隔离需要独立账户或系统服务（G4），本轮不做，写进 docs/11。
 
+## D24 · 前台激活用"双线程 attach"，且 ops 必须先激活再点击
+
+- **决策**：`Set-WaForeground` 在直接 `SetForegroundWindow` 失败后，own 线程同时 attach 到前台线程与目标窗口线程，然后再设置；`ops/find-and-click`、`ops/fill` 在点击前必调 `wwin focus`，失败即 `ENV_NOT_FOREGROUND`。
+- **依据**：实测后台进程仅 `SetForegroundWindow` 返回 false；只 attach 前台线程仍失败；双 attach 成功（2026-10-21，fg=0x4b0fd8）。被遮挡时 `winput` 的 S7 断言会拒绝点击——**不弱化断言**，而是让 ops 负责先激活。
+- **限制**：用户正在主动操作的窗口会被抢焦点；因此每条激活都写审计，且只在前置 dry-run 通过后发生。
+
+## D25 · 模态对话框当作"子窗口"处理
+
+- **决策**：等待对话框用 `ops/wait-for --uia-name`（轮询 UIA），不用 `wwin list`；对话框内的按钮用同 hwnd 的 UIA 定位后点击。
+- **依据**：记事本"是否保存"提示在 UIA 树里是 depth 4–5 的 Text/Button，但**没有独立顶层窗口**（`wwin list` 看不到）。`WindowFromPoint` 的根仍是主窗口，所以 S7 断言依然成立。
+- **限制**：不同程序对话框实现差异大（有的确实是独立顶层窗口）；两种路径都要能用，先试 UIA，再退回 wwin。
+
+## D26 · 复合操作默认 dry-run，真实注入必须 `--yes` 且全程记审计
+
+- **决策**：`ops/open|fill|find-and-click` 无 `--yes` 时只输出计划（含将点击的 point / 将匹配的控件），不产生任何副作用；真实动作必须 `--yes`，且先过 `op_pause_gate`，结束时写 `WA_AUDIT_RESULT`。
+- **依据**：agent 的坐标推断可能错，用户需要一次"先看再点"的机会；同时给用户一个不注入也能审查动作的通道。
+- **限制**：dry-run 的 point 仍可能因窗口在两步之间移动而失效——真实点击时 `winput` 会重新校验 hwnd。
+
+## D27 · 复合操作的成功判据是"读回/落盘"，不是"动作已发出"
+
+- **决策**：`ops/fill` 以 UIA `--value` 读回与输入逐字符相同为成功（`matches:true`），`ops/open` 以窗口出现为准，端到端以落盘字节一致为准；只报 `injected:true` 不算成功。
+- **依据**：M2 已证明"发出了"与"打进去了"是两件事（IME、焦点、遮挡都可能吞掉输入）。
+- **限制**：读回依赖目标控件暴露 ValuePattern/TextPattern；自定义控件取不到时要显式返回 `verify:"unavailable"` 并降级为截图核对。
+
 ---
 
 ## 待定（等用户或等验证）
