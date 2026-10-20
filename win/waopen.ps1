@@ -6,6 +6,8 @@ param(
   [string]$Title = '',
   [int]$Timeout = 10
 )
+# Must be first: -File/-stdin invocations get no PROLOG from winps (K1).
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $env:WA_VERSION = $Version
 if ($Core -ne '') { . $Core }
 

@@ -27,10 +27,13 @@
 | `docs:` | 文档 |
 | `probe:` | 探测脚本或探测结论 |
 | `bin:` | 原语实现 |
+| `ops:` | 复合操作层 |
 | `guard:` | 安全层 |
 | `test:` | 测试与验收报告 |
 | `fix:` | 修 bug |
 | `chore:` | 杂务（gitignore、目录调整） |
+| `release:` | 版本冻结、构建产物与标签 |
+| `auth:` | 自授权清单（`authorization/self-grants.md`） |
 
 **body 必须写"为什么 + 实测数字"**。示例（真实提交）：
 
