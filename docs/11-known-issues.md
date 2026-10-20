@@ -36,3 +36,5 @@
 | K29 | Win11 记事本单进程多标签：再开一个文件是同一 hwnd 增 Tab，标题会变（`a.txt` → `*b.txt`），按 pid 找新窗口会失败 | M4 C8：hwnd 4919256 标题从 `c8-a.txt - Notepad` 变 `*c8-e2e.txt - Notepad` | 🟡 按标题匹配；把窗口当可复用容器（D25 相关） |
 | K30 | 记事本「是否保存」模态框是**子窗口**：UIA 树里可见（depth 4–5 的 Button），`wwin list` 看不到 | M4：`ops/find-and-click --name '^不保存$'` 成功关闭；`wwin list` 无该窗口 | 🟢 等对话框用 `ops/wait-for --uia-name`，点按钮走同 hwnd（D25） |
 | K31 | alt+F4 用合成按键只弹出保存提示，不等于关闭；行为随应用而异 | M4 实测 | 🟢 关闭统一走 `wwin close`（PostMessage WM_CLOSE），存不存交给应用 |
+| K32 | `jq '.desktop.secured // true'` 在 `secured=false` 时也返回 `true`：jq 的 `//` 把 `false` 当空值 | M5：`tests/check-m5.sh` 明明解锁却连两次 SKIP E8 | 🟢 布尔字段直接读，缺失才 fail-closed 当 true |
+| K33 | `tests/check-m4.sh` 的 N5（找不到控件）原先放在开窗之前，实际拿到的是 `ENV_NO_WINDOW` | M4 首次跑：N5 假阴性 | 🟢 阴性用例同样有前置条件；N5 移到 C8-1 之后 |
