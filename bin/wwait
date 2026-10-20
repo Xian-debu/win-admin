@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# bin/wwait - wait until a window matching --title (regex) or --hwnd appears; reports how long it took.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+TITLE=""; HWND=""; TIMEOUT=10; INTERVAL=100
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      cat <<'EOF'
+usage: wwait --title REGEX [--timeout SEC] [--interval MS]
+       wwait --hwnd 0x1234 [--timeout SEC]
+  Polls top-level windows until a match appears; prints elapsed_ms and the window.
+  exit 0 found | 2 arg | 3 ENV_WAIT_TIMEOUT | 5 exec
+EOF
+      exit 0 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --interval) INTERVAL="$2"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+[ -n "$TITLE" ] || [ -n "$HWND" ] || { echo "wwait needs --title or --hwnd" >&2; exit 2; }
+
+args=(wwait -Version "$VERSION" -Timeout "$TIMEOUT" -Interval "$INTERVAL")
+[ -n "$TITLE" ] && args+=(-Title "$TITLE")
+[ -n "$HWND" ] && args+=(-Hwnd "$((HWND))")
+raw="$(wa_run "${args[@]}")"
+wa_finish "$raw"
