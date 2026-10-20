@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# bin/winput - guarded synthetic input. Dry-run by default; real injection needs --yes + a valid grant.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+usage() {
+  cat <<'EOF'
+usage:
+  winput move X Y
+  winput click X Y [--button left|right|middle] [--count N]
+  winput dclick X Y
+  winput drag X1 Y1 X2 Y2 [--steps N]
+  winput key COMBO            (e.g. ctrl+s, alt+f4, enter, f5)
+  winput type --text "..." | --text-file PATH
+Flags for all actions:
+  --yes              actually inject (default is --dry-run)
+  --dry-run          only print the plan (default)
+  --expect-hwnd H    required for click/dclick/drag (S7: never click blind)
+  --focus            try SetForegroundWindow when target is not foreground
+  --no-restore-clip  for type: do not restore the previous clipboard
+exit 0 ok | 2 arg | 3 env (locked / wrong window / not foreground) | 4 guard | 5 exec
+EOF
+}
+
+ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
+COMBO=""; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
+
+[ $# -gt 0 ] || { usage >&2; exit 2; }
+case "$1" in -h|--help) usage; exit 0 ;; esac
+ACTION="$1"; shift
+
+pos=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    --button) BUTTON="$2"; shift 2 ;;
+    --count) COUNT="$2"; shift 2 ;;
+    --steps) STEPS="$2"; shift 2 ;;
+    --expect-hwnd) HWND="$2"; shift 2 ;;
+    --focus) FOCUS=1; shift ;;
+    --no-restore-clip) NOCLIP=1; shift ;;
+    --text) TEXT="$2"; shift 2 ;;
+    --text-file) TF="$2"; shift 2 ;;
+    -*) echo "unknown flag: $1" >&2; exit 2 ;;
+    *) pos+=("$1"); shift ;;
+  esac
+done
+
+case "$ACTION" in
+  move)
+    [ ${#pos[@]} -eq 2 ] || { echo "move needs X Y" >&2; exit 2; }
+    X="${pos[0]}"; Y="${pos[1]}" ;;
+  click|dclick)
+    [ ${#pos[@]} -eq 2 ] || { echo "$ACTION needs X Y" >&2; exit 2; }
+    X="${pos[0]}"; Y="${pos[1]}" ;;
+  drag)
+    [ ${#pos[@]} -eq 4 ] || { echo "drag needs X1 Y1 X2 Y2" >&2; exit 2; }
+    X="${pos[0]}"; Y="${pos[1]}"; X2="${pos[2]}"; Y2="${pos[3]}" ;;
+  key)
+    [ ${#pos[@]} -eq 1 ] || { echo "key needs a combo like ctrl+s" >&2; exit 2; }
+    COMBO="${pos[0]}" ;;
+  type) : ;;
+  *) echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
+esac
+
+if [ "$ACTION" = "type" ] && [ -z "$TEXT" ] && [ -z "$TF" ]; then
+  echo "type needs --text or --text-file" >&2; exit 2
+fi
+
+# S1/S2: real injection must pass the guard; dry-run never touches the desktop, but logging it is M3.
+if [ "$REAL" -eq 1 ]; then
+  g="$(bash "$REPO_DIR/guard/check.sh" input)"
+  grc=$?
+  if [ $grc -ne 0 ]; then printf '%s\n' "$g"; exit $grc; fi
+fi
+
+args=(winput -Version "$VERSION" -Action "$ACTION")
+case "$ACTION" in
+  move|click|dclick) args+=(-X "$X" -Y "$Y") ;;
+  drag) args+=(-X "$X" -Y "$Y" -X2 "$X2" -Y2 "$Y2" -Steps "$STEPS") ;;
+  key) args+=(-Combo "$COMBO") ;;
+esac
+[ "$ACTION" = "click" ] && args+=(-Button "$BUTTON" -Count "$COUNT")
+[ "$HWND" != "0" ] && args+=(-ExpectHwnd "$HWND")
+[ "$FOCUS" -eq 1 ] && args+=(-Focus)
+[ "$NOCLIP" -eq 1 ] && args+=(-NoRestoreClip)
+[ "$REAL" -eq 0 ] && args+=(-DryRun)
+
+typef=""
+if [ "$ACTION" = "type" ]; then
+  if [ -z "$TF" ]; then
+    mkdir -p "$APP_ROOT/tmp"
+    TF="$APP_ROOT/tmp/type-$$.txt"
+    typef="$TF"
+    printf '%s' "$TEXT" > "$TF"
+  fi
+  args+=(-TextFile "$(wa_winpath "$TF")")
+fi
+
+raw="$(wa_run "${args[@]}")"
+[ -n "$typef" ] && rm -f "$typef"
+wa_finish "$raw"
