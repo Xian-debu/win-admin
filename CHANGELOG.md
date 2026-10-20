@@ -3,6 +3,25 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [1.0.0] - 2026-10-21
+
+首个正式版：**在授权窗口内操作 Windows 桌面**的能力包冻结。
+
+### Added
+- `tests/check-m5.sh`：全表回归入口（m1..m4 + release + E8 十轮），`--only-a` / `--only-b` 可单独重跑。
+- `tests/helpers/e2e.sh`：端到端单轮（open → fill → ctrl+s → 字节比对 → close）供 m4/m5 共用。
+- `docs/12-retro.md`：九个翻车点按代价排序 + 三个关键判断 + 明确没做的事。
+
+### Fixed
+- E1 提交前缀白名单缺 `ops`（全表回归第一枪就红）；`docs/08` 的 type 表补 `ops`/`release`/`auth`。
+- `win/waopen.ps1` 缺首行 `OutputEncoding`，`check-release` 第 3 项红。
+- `jq '.desktop.secured // true'` 把 `false` 当空值 → 解锁被误判锁屏，E8 连两次 SKIP（K32）。
+
+### Measured
+- 全表：m1 17/0、m2 11/0、m3 20/0、m4 13/0、release pass=yes（合计 61 项断言）。
+- E8 十轮：8185–8288 ms 全绿；另一次独立十轮跑 8158–8289 ms（极差 ≤131 ms）。
+- 单次 `bash tests/check-m5.sh` → `SUMMARY pass=6 fail=0 skip=0`。
+
 ## [0.3.0] - 2026-10-21
 
 ### Added
