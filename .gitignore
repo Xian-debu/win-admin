@@ -18,3 +18,4 @@ __pycache__/
 
 # 本地探针临时物
 inventory/raw/tmp/
+dist/
