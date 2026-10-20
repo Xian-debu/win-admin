@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# bin/wshot - DPI-aware physical-pixel screenshot (full screen or a rect).
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+OUT=""; RECT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      cat <<'EOF'
+usage: wshot [--out PATH.png] [--rect X,Y,W,H]
+  Default: full virtual screen into C:/Users/Public/win-admin/shots/.
+  Prints one JSON object: path (Windows), wsl_path, x,y,w,h, bytes, screen.
+  exit 0 ok | 2 ARG_OUT_OF_SCREEN | 3 ENV_SECURE_DESKTOP | 5 exec failure
+EOF
+      exit 0 ;;
+    --out) OUT="$2"; shift 2 ;;
+    --rect) RECT="$2"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+args=(wshot -Version "$VERSION")
+if [ -n "$OUT" ]; then args+=(-Out "$(wa_winpath "$OUT")"); fi
+if [ -n "$RECT" ]; then
+  IFS=, read -r rx ry rw rh <<< "$RECT"
+  args+=(-X "$rx" -Y "$ry" -W "$rw" -H "$rh")
+fi
+
+raw="$(wa_run "${args[@]}")"
+j="$(wa_json_of "$raw")"
+if [ -z "$j" ]; then
+  printf '%s\n' "$raw" >&2
+  wa_err_json EXEC_FAIL "no JSON from wshot payload"
+  exit 5
+fi
+if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+  printf '%s\n' "$j" | jq -c --arg w "$(wa_wslpath "$(printf '%s' "$j" | jq -r .path)")" '. + {wsl_path: $w}'
+  exit 0
+fi
+printf '%s\n' "$j"
+wa_exit_for "$(printf '%s' "$j" | jq -r '.code // "EXEC_FAIL"')"

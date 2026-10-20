@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# bin/wdiag - read-only preflight: session, desktop, screen, foreground, payload version.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+case "${1:-}" in
+  -h|--help)
+    cat <<'EOF'
+usage: wdiag [--raw]
+  Prints one JSON object with Windows-side facts plus WSL-side guard state.
+  exit 0 ok | 3 ENV_* (not installed, secure desktop) | 5 exec failure
+EOF
+    exit 0
+    ;;
+esac
+
+raw="$(wa_run wdiag -Version "$VERSION")"
+j="$(wa_json_of "$raw")"
+if [ -z "$j" ]; then
+  printf '%s\n' "$raw" >&2
+  wa_err_json EXEC_FAIL "no JSON from wdiag payload"
+  exit 5
+fi
+if ! printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+  printf '%s\n' "$j"
+  wa_exit_for "$(printf '%s' "$j" | jq -r '.code // "EXEC_FAIL"')"
+fi
+printf '%s\n' "$j" | jq -c --argjson g "$(wa_guard_state)" '. + {guard: $g, wsl: {version: "'"$VERSION"'", app_root: "'"$APP_ROOT"'"}}'
+exit 0

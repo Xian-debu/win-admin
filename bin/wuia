@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# bin/wuia - UI Automation: list top-level windows or dump a bounded element tree.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+LIST=0; HWND=""; TITLE=""; DEPTH=3; MAX=400; FILTER=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help)
+      cat <<'EOF'
+usage: wuia --list
+       wuia (--hwnd 0x1234 | --title REGEX) [--depth N] [--max N] [--filter REGEX]
+  Bounded: depth default 3, max nodes default 400. Rect is physical pixels.
+  exit 0 ok | 2 arg | 3 ENV_NO_WINDOW | 5 exec failure
+EOF
+      exit 0 ;;
+    --list) LIST=1; shift ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --max) MAX="$2"; shift 2 ;;
+    --filter) FILTER="$2"; shift 2 ;;
+    *) echo "unknown arg: $1" >&2; exit 2 ;;
+  esac
+done
+
+args=(wuia -Version "$VERSION" -Depth "$DEPTH" -MaxNodes "$MAX")
+if [ "$LIST" = 1 ]; then args+=(-List); fi
+if [ -n "$HWND" ]; then args+=(-Hwnd "$((HWND))"); fi
+if [ -n "$TITLE" ]; then args+=(-Title "$TITLE"); fi
+if [ -n "$FILTER" ]; then args+=(-Filter "$FILTER"); fi
+
+raw="$(wa_run "${args[@]}")"
+wa_finish "$raw"

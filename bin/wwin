@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# bin/wwin - window inventory. M1 supports: list.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+
+sub="${1:-list}"
+case "$sub" in
+  -h|--help|help)
+    cat <<'EOF'
+usage: wwin list
+  Lists visible top-level windows (hwnd, title, class, pid, process, rect).
+  exit 0 ok | 2 arg | 5 exec failure
+EOF
+    exit 0 ;;
+  list) ;;
+  *) echo "unsupported action: $sub (M1 supports list only)" >&2; exit 2 ;;
+esac
+
+raw="$(wa_run wwin -Action list)"
+wa_finish "$raw"
