@@ -38,7 +38,7 @@ say "E4 exit codes"
 bash "$REPO_DIR/bin/wdiag" >/dev/null 2>&1; [ $? -eq 0 ] && ok E4a "wdiag ok -> 0" || no E4a "wdiag not 0"
 bash "$REPO_DIR/bin/wshot" --rect 99999,0,10,10 >/dev/null 2>&1; [ $? -eq 2 ] && ok E4b "out-of-screen -> 2" || no E4b "wrong code for ARG"
 bash "$REPO_DIR/bin/wuia" --hwnd 1 >/dev/null 2>&1; [ $? -eq 3 ] && ok E4c "bad hwnd -> 3" || no E4c "wrong code for ENV"
-bash "$REPO_DIR/guard/check.sh" input >/dev/null 2>&1; [ $? -eq 4 ] && ok E4d "guard denies input -> 4" || no E4d "wrong code for GUARD"
+mkdir -p /tmp/wa-empty-state; WINADMIN_STATE_DIR=/tmp/wa-empty-state bash "$REPO_DIR/guard/check.sh" input >/dev/null 2>&1; [ $? -eq 4 ] && ok E4d "guard denies input without grant -> 4" || no E4d "wrong code for GUARD"
 bash "$REPO_DIR/bin/wshot" --nonsense >/dev/null 2>&1; [ $? -eq 2 ] && ok E4e "unknown flag -> 2" || no E4e "wrong code for unknown flag"
 
 # ---------- E6 timing ----------
