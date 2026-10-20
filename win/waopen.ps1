@@ -9,6 +9,11 @@ param(
 $env:WA_VERSION = $Version
 if ($Core -ne '') { . $Core }
 
+# Local fail helper: writes the failure JSON and exits with the documented code.
+function Fail([string]$code, [string]$msg, [int]$rc = 3) { Write-WaFail $code $msg; exit $rc }
+# Unexpected terminating errors must still yield one JSON object on stdout.
+trap { Write-WaFail 'EXEC_FAIL' $_.Exception.Message; exit 5 }
+
 $desk = Get-WaDesktopInfo
 if ($desk.secured) { Fail (Get-WaBlockCode $desk) ("desktop secured: " + $desk.desktop) }
 

@@ -34,7 +34,8 @@ done
 [ -n "$TEXT" ] || [ -n "$TF" ] || { usage >&2; exit 2; }
 [ -n "$TF" ] && TEXT="$(cat "$TF")"
 
-H="$(op_resolve_hwnd "$HWND" "$TITLE")" || exit $?
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
 H="$((H))"   # jq --argjson does not accept 0x hex
 NODE="$(op_find_node "$H" "$NAME" "Edit|Document" "$IDX" 8 2000)" || op_die EXEC_UIA "wuia failed for hwnd $H"
 [ -n "$NODE" ] || op_die ENV_NO_NODE "no edit control matched (hwnd=$H name=$NAME)"
