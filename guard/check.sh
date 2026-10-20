@@ -28,6 +28,28 @@ if [ ! -f "$G" ]; then
   exit 4
 fi
 
+# S6: signature check before trusting any field (only guard/grant.sh writes a valid sig).
+KEY="$STATE_DIR/.grantkey"
+if [ ! -s "$KEY" ]; then
+  wa_err_json GUARD_TAMPERED "signing key missing; re-issue with guard/grant.sh issue"
+  exit 4
+fi
+sig="$(jq -r '.sig // ""' "$G" 2>/dev/null || true)"
+if [ -z "$sig" ]; then
+  wa_err_json GUARD_TAMPERED "grant has no signature (pre-M3 grant); re-issue with guard/grant.sh issue"
+  exit 4
+fi
+payload="$(jq -cS '{issued,expires,scope,note,revoked}' "$G" 2>/dev/null || true)"
+if [ -z "$payload" ]; then
+  wa_err_json GUARD_TAMPERED "grant.json is not valid JSON"
+  exit 4
+fi
+calc="$(printf '%s' "$(cat "$KEY")$payload" | sha256sum | cut -d' ' -f1)"
+if [ "$calc" != "$sig" ]; then
+  wa_err_json GUARD_TAMPERED "grant signature mismatch; grant.json was edited outside guard/grant.sh"
+  exit 4
+fi
+
 revoked="$(jq -r '.revoked // false' "$G" 2>/dev/null || echo true)"
 [ "$revoked" = "true" ] && { wa_err_json GUARD_REVOKED "grant revoked"; exit 4; }
 
