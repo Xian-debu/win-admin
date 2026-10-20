@@ -27,7 +27,9 @@
 | 06 | [决策记录](docs/06-decisions.md) | D1–D14：为什么这么选、否掉了什么、何时该推翻 | 现行 |
 | 07 | [验收标准](docs/07-acceptance.md) | **冻结件**：E1–E8 / C1–C8 / S1–S8 共 24 条判据 + 里程碑门槛 | 冻结 |
 | 08 | [工程规范](docs/08-conventions.md) | 目录归属、提交规范、证据规则、坐标编码铁律、原语模板、DoD | 现行 |
-| 09 | [路线图](docs/09-roadmap.md) | M0–M5 里程碑、工作项、风险、G1–G5 授权点 | 现行 |
+| 09 | [路线图](docs/09-roadmap.md) | M0–M6 里程碑、工作项、风险、G1–G5 授权点 | 现行（M0/M0.5/M1 已完成） |
+| 10 | [部署包](docs/10-deployment.md) | 两个包装到哪、怎么升级回滚卸载、怎么打发布物 | 现行 |
+| 11 | [已知问题](docs/11-known-issues.md) | K1–K14：每条都有实测证据与修复状态 | 活文档 |
 
 ## 目录结构
 
@@ -71,24 +73,41 @@ win-admin/
 | 会话 | `SessionId=1`，explorer 在 session 1 | 有真实交互桌面可操作 |
 | 视觉通道 | ✅ 可读 2560×1600 截图中的 UI 文字 | L4 语义成立，可"看全局"，但不用于判 2px 对齐 |
 
-## 现在能用什么（M0 阶段）
+## 现在能用什么（M1 阶段，只读）
 
 ```bash
-# 只读环境体检，复现 docs/02 的全部数字
-bash inventory/scripts/probe-env.sh
+# 0) 安装 Windows 侧载荷到 C:/Users/Public/win-admin/app/<version>/（幂等）
+bash scripts/bootstrap.sh            # 末尾出现 SMOKE PASS 即成功
 
-# 看它的输出
-cat inventory/raw/$(date +%F)-probe.txt
+# 1) 环境体检（会话/锁屏/DPI/屏幕/前台窗口）
+bash bin/wdiag | jq .
+
+# 2) 截图（物理像素 2560×1600；区域截图加 --rect x,y,w,h）
+bash bin/wshot | jq -r .wsl_path
+
+# 3) 列窗口 / 读控件树（语义定位）
+bash bin/wwin list | jq -c '.windows[] | {hwnd,title}'
+bash bin/wuia --title 'Notepad' --depth 2 | jq -c '.nodes[] | {depth,name,type}'
+
+# 4) 验收（17 项，全绿才算 M1 通过）
+bash tests/check-m1.sh
+
+# 5) 部署工程自检 / 回退 / 卸载
+bash scripts/check-release.sh
+bash scripts/rollback.sh --list
+bash scripts/uninstall.sh --yes
 ```
 
-除探测脚本外，仓库里**没有任何能操作 Windows 的代码**——这是刻意的（`docs/06` D14）。
+仓库里**仍然没有任何输入注入代码**——这是刻意的（`docs/06` D14），`winput` 在 M2 才出现。
+注入关键词由 `scripts/check-release.sh` 的第 4 项静态检查守护。
 
 ## 路线图（详见 `docs/09`）
 
 | 里程碑 | 内容 | 门槛 | 估算 |
 |---|---|---|---|
-| M0 ✅ | 文档与骨架 | E1 | 完成 |
-| M1 ⏸ | 只读：`wshot` `wuia` `wwin list` `wdiag` | E1–E7, C1–C3 | 4–6h |
+| M0 ✅ | 文档与骨架 | E1 | 2026-10-20 |
+| M0.5 ✅ | 双包部署工程（bootstrap/rollback/uninstall/可复现构建） | E9–E12 | 2026-10-21 |
+| M1 ✅ | 只读：`wshot` `wuia` `wwin list` `wdiag` | E1–E7, C1–C3（17/0 绿） | 2026-10-21 |
 | M2 | 输入：`winput` `wclip` + DPI 校准 | C4–C7, S7 | 6–10h |
 | M3 | 守卫：令牌 / 急停 / 审计 / 锁屏与 UAC 检测 | **S1–S8 全绿** | 4–6h |
 | M4 | 组合操作 + `SKILL.md` + 端到端 | C8, E8 | 5–8h |
@@ -98,7 +117,7 @@ cat inventory/raw/$(date +%F)-probe.txt
 
 | 事件 | 门 |
 |---|---|
-| 开始 M1 实施 | **用户授权开工**（"等我授权开工"） |
+| 开始 M2 实施（第一次写注入代码） | **用户授权开工**（M1 已交付，等下一步指令） |
 | 装任何 Windows Python 包 | G1（当前设计不需要） |
 | 常驻急停进程 / 全局热键 / 自启 | G4 + G3（可跳过，软急停够用） |
 | 删除/覆盖既有产物 | G5 |

@@ -68,14 +68,29 @@ exit   : 0 成功 / 2 参数错误 / 3 环境不满足（如锁屏） / 4 权限
 
 ## 4. L1 · 原语清单（bin/）
 
-| 原语 | 职责 | 输入 | 输出（data） | 里程碑 |
+| 原语 | 职责 | 输入 | 输出（stdout，单 JSON） | 状态 |
 |---|---|---|---|---|
-| `wshot` | 截图 | `--monitor N` / `--rect x,y,w,h` / `--full` | `{path,w,h,scale}` | M1 |
-| `wuia` | 控件树 | `--window "#标题" `/` --pid N` / `--depth N` / `--filter type=Button` | `{nodes:[{name,type,rect,invokable,...}]}` | M1 |
-| `wwin` | 窗口操作 | `list` / `focus --hwnd H` / `layout x,y,w,h` / `state max|min|restore` | `{hwnd,title,rect,state}` | M1(list)/M2(改) |
-| `winput` | 输入注入 | `move x,y` / `click x,y[,btn] `/ `dclick` / `drag x1,y1,x2,y2` / `key ctrl+s` / `type "文本"` | `{injected:true}` | M2 |
-| `wclip` | 剪贴板 | `get` / `set "文本"` | `{text}` | M2（中文输入依赖） |
-| `wdiag` | 前置体检 | — | `{locked,foreground,session,dpi,guard}` | M1 |
+| `wdiag` | 前置体检 | — | `{ok,version,host,user,os,session,desktop,screen,dpiMode,foreground,powershell,guard,wsl}` | ✅ M1 |
+| `wshot` | 截图 | `--rect x,y,w,h` / `--out PATH` | `{ok,path,wsl_path,x,y,w,h,bytes,screen,dpiMode}` | ✅ M1 |
+| `wuia` | 窗口/控件树 | `--list` / `--hwnd H` / `--title REGEX` / `--depth N` / `--max N` / `--filter S` | `{ok,mode,hwnd,depth,maxNodes,count,truncated,nodes:[{depth,name,type,aid,class,rect{x,y,w,h},enabled,offscreen}]}` | ✅ M1 |
+| `wwin` | 窗口操作 | `list`（M2 起加 `focus`/`layout`/`state`） | `{ok,action,count,windows:[{hwnd,hwnd_dec,title,class,pid,process,visible,minimized,rect}],at}` | ✅ M1(list) |
+| `winput` | 输入注入 | `move`/`click`/`dclick`/`drag`/`key`/`type`（M2 起，默认 `--dry-run`） | `{injected:true,...}` | ☐ M2 |
+| `wclip` | 剪贴板 | `get` / `set "文本"` | `{text}` | ☐ M2（中文输入依赖） |
+
+**实现细节（M1 实测踩到，写在这里免得后人再踩）：**
+
+1. `bin/*` 是 bash 薄壳，真正干活的是 Windows 侧 `win/<name>.ps1`；经 `lib/common.sh` 的
+   `wa_run` 用 `winps -r -f <WSL 路径> -Core <Windows 路径>` 调起。
+2. **`winps -f` 收的是 WSL 路径**（它自己 `cat` 后再转交给 `powershell.exe -File`），
+   不是 `C:\...`；传错会得到 `cat: no such file`。
+3. 因为落点是 Windows 临时目录，**`$PSScriptRoot` 是 temp 目录而不是载荷目录**，
+   所以载荷不能靠 `$PSScriptRoot` 找 `wa-core.ps1`，必须由 `-Core` 显式传入。
+4. 载荷脚本第一件事是 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`（或 dot-source 已设好的
+   `wa-core.ps1`），末尾 `ConvertTo-Json -Compress`；否则 PS 5.1 按 OEM 936 输出（K1）。
+5. 所有 Win32 `*W` 系列 DllImport 必须写 `CharSet = CharSet.Unicode`，缺了会把 UTF-16 缓冲按
+   ANSI 读，表现为标题乱码 + 类名只剩一个字母（M1 的 B2）。
+6. `EnumWindows` 在本机命中 474 个顶层窗口，逐个 `Get-Process` 会让 `wwin` 慢到 12 s；
+   必须先做廉价预筛（`IsWindowVisible` + 标题非空）再构造信息 → 743 ms。
 
 **原语设计三原则：**
 

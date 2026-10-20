@@ -10,8 +10,8 @@
 | 里程碑 | 主题 | 交付物 | 门槛判据 | 估算 | 状态 |
 |---|---|---|---|---|---|
 | **M0** | 文档与骨架 | AGENTS.md、docs/01–09、仓库结构 | E1 | — | ✅ 2026-10-20 |
-| **M0.5** | 部署包工程 | 双包布局、VERSION、bootstrap/rollback/uninstall、发布构建 | E9–E12（见 §M0.5） | 3–4h | 🚧 进行中 |
-| **M1** | 只读：看得见、认得准 | `wshot` `wuia` `wwin(list)` `wdiag` | E1–E7, C1(+C1b), C2, C3 | 4–6h | 🚧 已授权，进行中 |
+| **M0.5** | 部署包工程 | 双包布局、VERSION、bootstrap/rollback/uninstall、发布构建 | E9–E12（见 §M0.5） | 3–4h | ✅ 2026-10-21 |
+| **M1** | 只读：看得见、认得准 | `wshot` `wuia` `wwin(list)` `wdiag` | E1–E7, C1(+C1b), C2, C3 | 4–6h | ✅ 2026-10-21（17/0） |
 | **M2** | 输入：点得中、打得进 | `winput` `wclip` `wwin(focus/layout)` + DPI 校准 | C4–C7, S7 | 6–10h | ☐ |
 | **M3** | 守卫：授权、急停、审计 | `guard/`（grant/pause/audit/preflight） | **S1–S8 全绿** | 4–6h | ☐ |
 | **M4** | 组合与技能 | `ops/` + `SKILL.md` + 端到端用例 | C8, E8, E 族回归 | 5–8h | ☐ |
@@ -23,7 +23,7 @@
 - 目的、环境、插件审计、能力矩阵、架构、决策、验收、规范、路线图九份 + AGENTS.md + README。
 - **不做任何探测性代码**，只清点不动刀。
 
-## M0.5 · 部署包工程（2026-10-21 起）
+## M0.5 · 部署包工程（✅ 2026-10-21 完成）
 
 ### 为什么是“两个包”
 
@@ -49,6 +49,10 @@ P1 通过 `current.txt` 找到 P2 的活动版本，因此升级/回滚都是**�
 | 0.5.5 | `docs/10-deployment.md` + `docs/11-known-issues.md` | 文档 | E9 |
 | 0.5.6 | 在**干净目录**复演一次安装→冒烟→回滚→卸载 | 报告 | E12 |
 
+**完成情况（2026-10-21）**：E9 `SUMMARY pass=yes`；E10 首装 `integrity ok: 5 files` + `SMOKE PASS`；
+E11 在 `/mnt/c/Users/Public/win-admin-e11` 复演 0.1.0→0.1.1→`rollback --previous`→0.1.0→`uninstall` 目录消失；
+E12 连续两次构建 `SHA256SUMS` 逐行一致（tar `9108935c…`，zip `557c781a…`）。详见 `tests/reports/2026-10-21-m1.md` §2。
+
 ### 判据（本阶段新增，追加进 docs/07）
 
 | 编号 | 判据 | 命令 | 期望 |
@@ -58,7 +62,7 @@ P1 通过 `current.txt` 找到 P2 的活动版本，因此升级/回滚都是**�
 | **E11** | 回滚与卸载可逆 | `scripts/rollback.sh --previous` 后 `wdiag.v` 变化；`uninstall.sh --yes` 后目录不存在 | 两条都成立 |
 | **E12** | 发布物可复现 | 连续两次 `build-release.sh` | 两个 `SHA256SUMS` 逐行一致 |
 
-## M1 · 只读（已授权，进行中）
+## M1 · 只读（✅ 2026-10-21 完成）
 
 ### 目标
 
@@ -79,6 +83,10 @@ P1 通过 `current.txt` 找到 P2 的活动版本，因此升级/回滚都是**�
 | 1.5 | `wwin list` | 原语 | 与 C2 的 hwnd 对照 |
 | 1.6 | Q1 复跑：截图读字，确认视觉通道 | 结论 | M0 已预验通过 |
 | 1.7 | `tests/check-m1.sh` + 报告 | 报告 | 填 E1–E7/C1–C3 实测列 |
+
+**验收结果（2026-10-21）**：`SUMMARY pass=17 fail=0 skip=14`，退出码 0。
+详见 `tests/reports/2026-10-21-m1.md`（含实测数字表与 6 个已修 bug 的复盘）。
+M2 未开工前提：仓库内仍无任何注入代码（D14），`check-release.sh` 第 4 项守护。
 
 ### 风险
 

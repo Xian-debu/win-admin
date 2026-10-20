@@ -108,6 +108,26 @@
   否则必然演变成"先能点，安全之后补"，然后永远补不上。
 - **执行**：`tests/` 有一条 `grep -r 'SendInput\|mouse_event\|keybd_event' bin/ ops/` 必须为空的守卫测试。
 
+## D15 · 载荷一律显式传 `-Core`，不依赖 `$PSScriptRoot`
+
+- **决策**：`bin/*` 调载荷时同时传 `-f <WSL 路径>` 与 `-Core <Windows 绝对路径>`。
+- **依据**：`winps -f` 把脚本 `cat` 进 Windows 临时目录再 `-File` 执行，`$PSScriptRoot` 指向 temp，
+  按它找 `lib/wa-core.ps1` 必然失败（M1 的 B1/B3 排查中实测）。
+- **代价**：多一个参数；**收益**：脚本放哪都能跑，不被 temp 路径绑架。
+
+## D16 · 所有 `*W` Win32 导入必须声明 `CharSet = CharSet.Unicode`
+
+- **决策**：`GetWindowTextW`/`GetClassNameW`/`GetUserObjectInformation` 等一律带 `CharSet.Unicode`。
+- **依据**：默认 `CharSet.Ansi` 时 .NET 按 ANSI 封送 `StringBuilder`，UTF-16 内容被截成单字母
+  （M1 实测：标题乱码、类名 `C`）。修复后标题完整、类名 `Chrome_WidgetWin_1`。
+- **执行**：`docs/08` 原语模板里写死这条；`check-release.sh` 不做静态检查（易误报），靠 C2/C3 回归守。
+
+## D17 · 残留检测比对"跑前/跑后"，不比对"是否存在"
+
+- **决策**：E5 改为快照 `tmp/` 跑前跑后差集，只有新增才算泄漏。
+- **依据**：早期 `-k` 留下的旧 `winps-*.ps1` 让 E5 假红；把"历史脏物"和"本次泄漏"混在一起，
+  会让测试失去意义（也叫"测试自己制造失败"）。
+
 ---
 
 ## 待定（等用户或等验证）
@@ -115,6 +135,7 @@
 | 编号 | 待定项 | 卡在哪 |
 |---|---|---|
 | ~~Q1~~ | ~~会话模型是否收图~~ | ✅ 已实测支持（2026-10-20，`inventory/raw/2026-10-20-q1-vision.txt`） |
-| Q4 | F12 是否与用户工具冲突 | 问用户；冲突则换 `Ctrl+Alt+F12` |
-| — | 急停热键是否需要（还是软通道够） | M3 前问 |
+| ~~Q2~~ | ~~锁屏检测方法~~ | ✅ 机制已实现（`OpenInputDesktop`+`GetUserObjectInformation` → `wdiag.desktop`），断言留 S3 |
+| ~~Q4~~ | ~~F12 热键冲突~~ | ✅ 已作废：用户确认"急停就按你说的"，只做 `pause.flag` 软通道，不常驻 |
+| Q3 | 多显示器坐标模型 | 本机单显示器，暂不需要；接第二块屏时再测（`wshot` 已按虚拟屏取区域） |
 | — | 是否需要"操作前征询"档位（每次点前问一句） | 用户偏好，M4 问 |
