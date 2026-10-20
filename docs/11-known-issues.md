@@ -29,3 +29,10 @@
 | K22 | 审计与 grant 都存放在同用户可写的 `~/.dsh/win-admin/`，同用户进程可删改/伪造 | D23 的设计限制（签名只防误改，key 同用户可读） | 🔴 真隔离需独立账户或系统服务（G4），本轮明确不做 |
 | K23 | 全屏像素比对不可用：桌面有动画元素，两张相隔 1s 的截图差 8185 px | M3：S1 初版全屏 diff 失败 | 🟢 `pixdiff.py --rect` 只比动作会影响的区域，S1 diff=0 |
 | K24 | 显示配置会变（M2 时 2560×1600，M3 时 1920×1080，且出现两块活动面板），任何写死坐标的脚本都会点错 | M3 环境快照：内屏 CSW1656 + 外接 TCL03D4 | 🟡 一切坐标从 `wdiag.screen` / `wwin info` 动态取；多屏负坐标场景仍未覆盖（Q3） |
+| K25 | `jq --argjson` 不接受 `0x` 十六进制：hwnd 原样传入直接 `invalid JSON text` | M4：ops 首次跑通即报 | 🟢 每个 ops 在解析后 `H=$((H))` 先转十进制 |
+| K26 | `H="$(op_resolve_hwnd ...)" \|\| exit $?` 会把失败 JSON 吞进变量，调用方只看到空 `code` | M4 N5 首跑：rc=3 但 code 为空 | 🟢 捕获后显式 `printf` 再按 rc 退出（ops/find-and-click、ops/fill） |
+| K27 | PowerShell 多行 `param()` 每一行（最后一个除外）必须以逗号结尾，否则 `参数列表缺少右括号` | M4：waopen.ps1 首版第 2 行报错 | 🟢 单行 param 或逐行加逗号 |
+| K28 | 改了 `win/*.ps1` 而没重跑 bootstrap，Windows 侧仍是旧载荷，症状是「没输出/行为没变」 | M4：多次 `no JSON from payload` | 🟢 改载荷后必须 `bash scripts/bootstrap.sh --force`；`wdiag` 报 payload 版本 |
+| K29 | Win11 记事本单进程多标签：再开一个文件是同一 hwnd 增 Tab，标题会变（`a.txt` → `*b.txt`），按 pid 找新窗口会失败 | M4 C8：hwnd 4919256 标题从 `c8-a.txt - Notepad` 变 `*c8-e2e.txt - Notepad` | 🟡 按标题匹配；把窗口当可复用容器（D25 相关） |
+| K30 | 记事本「是否保存」模态框是**子窗口**：UIA 树里可见（depth 4–5 的 Button），`wwin list` 看不到 | M4：`ops/find-and-click --name '^不保存$'` 成功关闭；`wwin list` 无该窗口 | 🟢 等对话框用 `ops/wait-for --uia-name`，点按钮走同 hwnd（D25） |
+| K31 | alt+F4 用合成按键只弹出保存提示，不等于关闭；行为随应用而异 | M4 实测 | 🟢 关闭统一走 `wwin close`（PostMessage WM_CLOSE），存不存交给应用 |
