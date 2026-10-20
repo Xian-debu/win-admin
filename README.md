@@ -1,6 +1,6 @@
 # win-admin · 让 WSL 里的 DSH 在授权窗口内操作 Windows 桌面
 
-> **当前状态：M0 规划完成，未写一行执行代码。等待用户授权后进入 M1（只读能力）。**
+> **当前状态：M2 已完成（2026-10-21）。可截图、读控件树、点、打、拖、等——全部默认拒绝、默认 dry-run。下一步 M3（守卫硬化）。**
 >
 > 一句话：不是"给 agent 开个后门"，而是**一套带刹车、带行车记录仪、见过反例的工具箱**。
 
@@ -73,7 +73,7 @@ win-admin/
 | 会话 | `SessionId=1`，explorer 在 session 1 | 有真实交互桌面可操作 |
 | 视觉通道 | ✅ 可读 2560×1600 截图中的 UI 文字 | L4 语义成立，可"看全局"，但不用于判 2px 对齐 |
 
-## 现在能用什么（M1 阶段，只读）
+## 现在能用什么（M2 阶段）
 
 ```bash
 # 0) 安装 Windows 侧载荷到 C:/Users/Public/win-admin/app/<version>/（幂等）
@@ -89,17 +89,28 @@ bash bin/wshot | jq -r .wsl_path
 bash bin/wwin list | jq -c '.windows[] | {hwnd,title}'
 bash bin/wuia --title 'Notepad' --depth 2 | jq -c '.nodes[] | {depth,name,type}'
 
-# 4) 验收（17 项，全绿才算 M1 通过）
-bash tests/check-m1.sh
+# 4) 输入（默认 dry-run 只打印计划；真实注入要 --yes + 有效授权）
+bash guard/grant.sh issue --minutes 30 --scope input --note "用户原话：..."   # 授权
+bash bin/wwait --title 'Notepad' --timeout 10                                  # 等窗口出现
+bash bin/winput click 100 200 --expect-hwnd 0x108c6 --focus                    # 打印计划
+bash bin/winput click 100 200 --expect-hwnd 0x108c6 --focus --yes              # 真的点
+bash bin/winput type --text "中文内容" --expect-hwnd 0x108c6 --yes             # 剪贴板粘贴
+bash bin/wuia --hwnd 0x108c6 --value | jq -r .value                            # 回读校验
+bash bin/wclip get                                                             # 剪贴板
+bash guard/grant.sh revoke                                                     # 撤销
 
-# 5) 部署工程自检 / 回退 / 卸载
+# 5) 验收（M1 17 项 / M2 11 项，全绿才算过）
+bash tests/check-m1.sh
+bash tests/check-m2.sh
+
+# 6) 部署工程自检 / 回退 / 卸载
 bash scripts/check-release.sh
 bash scripts/rollback.sh --list
 bash scripts/uninstall.sh --yes
 ```
 
-仓库里**仍然没有任何输入注入代码**——这是刻意的（`docs/06` D14），`winput` 在 M2 才出现。
-注入关键词由 `scripts/check-release.sh` 的第 4 项静态检查守护。
+注入代码现在**只允许存在于 `winput`**（`bin/winput` + `win/winput.ps1`），由 `scripts/check-release.sh` 第 4 项静态检查守护（`docs/06` D14 随里程碑演进）。
+单次原语经 winps 桥约 600–750 ms——真实任务要靠 M4 的复合操作把多次动作压进一次会话，而不是循环调用原语。
 
 ## 路线图（详见 `docs/09`）
 
@@ -108,7 +119,7 @@ bash scripts/uninstall.sh --yes
 | M0 ✅ | 文档与骨架 | E1 | 2026-10-20 |
 | M0.5 ✅ | 双包部署工程（bootstrap/rollback/uninstall/可复现构建） | E9–E12 | 2026-10-21 |
 | M1 ✅ | 只读：`wshot` `wuia` `wwin list` `wdiag` | E1–E7, C1–C3（17/0 绿） | 2026-10-21 |
-| M2 | 输入：`winput` `wclip` + DPI 校准 | C4–C7, S7 | 6–10h |
+| M2 ✅ | 输入：`winput` `wclip` `wwait` `wwin info` | C4–C7, S7（11/0 绿） | 2026-10-21 |
 | M3 | 守卫：令牌 / 急停 / 审计 / 锁屏与 UAC 检测 | **S1–S8 全绿** | 4–6h |
 | M4 | 组合操作 + `SKILL.md` + 端到端 | C8, E8 | 5–8h |
 | M5 | 稳定化与冻结 | 全表回归 | 2–3h |
@@ -117,7 +128,7 @@ bash scripts/uninstall.sh --yes
 
 | 事件 | 门 |
 |---|---|
-| 开始 M2 实施（第一次写注入代码） | **用户授权开工**（M1 已交付，等下一步指令） |
+| 开始 M3 实施（审计日志、锁屏/UAC 拒绝、令牌不可篡改） | **用户授权开工**（M2 已交付，等下一步指令） |
 | 装任何 Windows Python 包 | G1（当前设计不需要） |
 | 常驻急停进程 / 全局热键 / 自启 | G4 + G3（可跳过，软急停够用） |
 | 删除/覆盖既有产物 | G5 |
