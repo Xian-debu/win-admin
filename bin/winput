@@ -2,6 +2,8 @@
 # bin/winput - guarded synthetic input. Dry-run by default; real injection needs --yes + a valid grant.
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+wa_audit_init winput "$@"
 
 usage() {
   cat <<'EOF'
@@ -25,14 +27,14 @@ EOF
 ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
 COMBO=""; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
 
-[ $# -gt 0 ] || { usage >&2; exit 2; }
-case "$1" in -h|--help) usage; exit 0 ;; esac
+[ $# -gt 0 ] || { WA_AUDIT_RESULT=ARG_NO_ARGS; usage >&2; exit 2; }
+case "$1" in -h|--help) WA_AUDIT_RESULT=help; usage; exit 0 ;; esac
 ACTION="$1"; shift
 
 pos=()
 while [ $# -gt 0 ]; do
   case "$1" in
-    -h|--help) usage; exit 0 ;;
+    -h|--help) WA_AUDIT_RESULT=help; usage; exit 0 ;;
     --yes) REAL=1; shift ;;
     --dry-run) REAL=0; shift ;;
     --button) BUTTON="$2"; shift 2 ;;
@@ -43,37 +45,40 @@ while [ $# -gt 0 ]; do
     --no-restore-clip) NOCLIP=1; shift ;;
     --text) TEXT="$2"; shift 2 ;;
     --text-file) TF="$2"; shift 2 ;;
-    -*) echo "unknown flag: $1" >&2; exit 2 ;;
+    -*) WA_AUDIT_RESULT=ARG_UNKNOWN_FLAG; echo "unknown flag: $1" >&2; exit 2 ;;
     *) pos+=("$1"); shift ;;
   esac
 done
 
 case "$ACTION" in
   move)
-    [ ${#pos[@]} -eq 2 ] || { echo "move needs X Y" >&2; exit 2; }
+    [ ${#pos[@]} -eq 2 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "move needs X Y" >&2; exit 2; }
     X="${pos[0]}"; Y="${pos[1]}" ;;
   click|dclick)
-    [ ${#pos[@]} -eq 2 ] || { echo "$ACTION needs X Y" >&2; exit 2; }
+    [ ${#pos[@]} -eq 2 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "$ACTION needs X Y" >&2; exit 2; }
     X="${pos[0]}"; Y="${pos[1]}" ;;
   drag)
-    [ ${#pos[@]} -eq 4 ] || { echo "drag needs X1 Y1 X2 Y2" >&2; exit 2; }
+    [ ${#pos[@]} -eq 4 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "drag needs X1 Y1 X2 Y2" >&2; exit 2; }
     X="${pos[0]}"; Y="${pos[1]}"; X2="${pos[2]}"; Y2="${pos[3]}" ;;
   key)
-    [ ${#pos[@]} -eq 1 ] || { echo "key needs a combo like ctrl+s" >&2; exit 2; }
+    [ ${#pos[@]} -eq 1 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "key needs a combo like ctrl+s" >&2; exit 2; }
     COMBO="${pos[0]}" ;;
   type) : ;;
-  *) echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
+  *) WA_AUDIT_RESULT=ARG_BAD_ACTION; echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
 esac
 
 if [ "$ACTION" = "type" ] && [ -z "$TEXT" ] && [ -z "$TF" ]; then
-  echo "type needs --text or --text-file" >&2; exit 2
+  WA_AUDIT_RESULT=ARG_NEED_TEXT; echo "type needs --text or --text-file" >&2; exit 2
 fi
 
 # S1/S2: real injection must pass the guard; dry-run never touches the desktop, but logging it is M3.
 if [ "$REAL" -eq 1 ]; then
   g="$(bash "$REPO_DIR/guard/check.sh" input)"
   grc=$?
-  if [ $grc -ne 0 ]; then printf '%s\n' "$g"; exit $grc; fi
+  if [ $grc -ne 0 ]; then
+    WA_AUDIT_RESULT="$(printf '%s' "$g" | jq -r '.code // "GUARD_DENIED"' 2>/dev/null || echo GUARD_DENIED)"
+    printf '%s\n' "$g"; exit $grc
+  fi
 fi
 
 args=(winput -Version "$VERSION" -Action "$ACTION")
@@ -101,4 +106,20 @@ fi
 
 raw="$(wa_run "${args[@]}")"
 [ -n "$typef" ] && rm -f "$typef"
-wa_finish "$raw"
+
+j="$(wa_json_of "$raw")"
+if [ -z "$j" ]; then
+  WA_AUDIT_RESULT=EXEC_NO_JSON
+  printf '%s\n' "$raw" >&2
+  wa_err_json EXEC_FAIL "no JSON from payload (see stderr)"
+  exit 5
+fi
+printf '%s\n' "$j"
+if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+  if [ "$REAL" -eq 1 ]; then WA_AUDIT_RESULT=ok; else WA_AUDIT_RESULT=dryrun; fi
+  exit 0
+fi
+code="$(printf '%s' "$j" | jq -r '.code // "EXEC_FAIL"' 2>/dev/null)"
+[ -n "$code" ] || code=EXEC_FAIL
+WA_AUDIT_RESULT="$code"
+wa_exit_for "$code"
