@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# ops/wait-for - wait for a window (title) or a control (uia name) to appear.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-waitfor "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/wait-for (--title REGEX | --uia-name REGEX --hwnd H) [--timeout SEC] [--interval MS]
+  --title     wait for a visible top-level window whose title matches
+  --uia-name  wait for a control in window H whose UIA name matches
+  exit 0 ok | 2 arg | 3 env (ENV_WAIT_TIMEOUT) | 4 guard | 5 exec
+EOF
+}
+
+TITLE=""; UNAME=""; HWND=0; TIMEOUT=10; INTERVAL=100
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --uia-name) UNAME="$2"; shift 2 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --interval) INTERVAL="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [ -n "$TITLE" ] && [ -z "$UNAME" ]; then
+  OUT="$(bash "$REPO_DIR/bin/wwait" --title "$TITLE" --timeout "$TIMEOUT" --interval "$INTERVAL")"
+  RC=$?
+  if [ $RC -eq 0 ]; then WA_AUDIT_RESULT=ok; else WA_AUDIT_RESULT=ENV_WAIT_TIMEOUT; fi
+  printf '%s\n' "$OUT"
+  exit "$RC"
+fi
+
+[ -n "$UNAME" ] || { usage >&2; exit 2; }
+[ "$HWND" != "0" ] || op_die ARG_NEED_TARGET "with --uia-name you must pass --hwnd"
+HWND="$((HWND))"   # jq --argjson does not accept 0x hex
+T0="$(date +%s%3N)"
+DEADLINE=$(( T0 + TIMEOUT * 1000 ))
+while : ; do
+  J="$(bash "$REPO_DIR/bin/wuia" --hwnd "$HWND" --depth 8 --max 2000)" || true
+  N="$(printf '%s' "$J" | jq -c --arg n "$UNAME" '[.nodes[] | select(.name | test($n))][0] // empty' 2>/dev/null)"
+  if [ -n "$N" ]; then
+    NOW="$(date +%s%3N)"
+    WA_AUDIT_RESULT=ok
+    jq -nc --arg n "$UNAME" --argjson h "$HWND" --argjson node "$N" --argjson el $(( NOW - T0 )) \
+      '{ok:true,tool:"ops/wait-for",mode:"uia",hwnd:$h,name:$n,node:$node,elapsed_ms:$el}'
+    exit 0
+  fi
+  NOW="$(date +%s%3N)"
+  [ "$NOW" -ge "$DEADLINE" ] && { WA_AUDIT_RESULT=ENV_WAIT_TIMEOUT; wa_err_json ENV_WAIT_TIMEOUT "control not found within $TIMEOUT s: $UNAME"; exit 3; }
+  sleep 0.2
+done

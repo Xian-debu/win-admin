@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# ops/open - launch a Windows app and wait for its window. Dry-run by default.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-open "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/open --exe PATH [--args STRING] [--title REGEX] [--timeout SEC] [--yes]
+  --yes      actually launch (default prints the plan)
+  --title    also accept any visible window whose title matches REGEX
+  exit 0 ok | 2 arg | 3 env | 4 guard | 5 exec
+EOF
+}
+
+EXE=""; ARGS=""; TITLE=""; TIMEOUT=10; REAL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --exe) EXE="$2"; shift 2 ;;
+    --args) ARGS="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[ -n "$EXE" ] || { usage >&2; exit 2; }
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT="dryrun"
+  jq -nc --arg exe "$EXE" --arg args "$ARGS" --arg title "$TITLE" --argjson t "$TIMEOUT" \
+    '{ok:true,dry_run:true,tool:"ops/open",exe:$exe,args:$args,title:$title,timeout:$t}'
+  exit 0
+fi
+
+op_pause_gate write
+raw="$(wa_run waopen -Version "$VERSION" -Exe "$EXE" -Arguments "$ARGS" -Title "$TITLE" -Timeout "$TIMEOUT")"
+j="$(wa_json_of "$raw")"
+if [ -z "$j" ]; then
+  printf '%s\n' "$raw" >&2
+  WA_AUDIT_RESULT=EXEC_NO_JSON
+  wa_err_json EXEC_FAIL "no JSON from waopen"; exit 5
+fi
+printf '%s\n' "$j"
+if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+  WA_AUDIT_RESULT=ok; exit 0
+fi
+code="$(printf '%s' "$j" | jq -r '.code // "EXEC_FAIL"')"
+WA_AUDIT_RESULT="$code"
+wa_exit_for "$code"

@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# ops/fill - focus a text control, paste text, then read it back and compare. Dry-run by default.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-fill "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/fill (--hwnd H | --title REGEX) [--name REGEX] [--index N] --text STRING [--yes] [--no-verify]
+  default   dry-run: prints which control would be filled and with what text
+  --yes     real: click -> Ctrl+A -> clipboard paste -> read back with UIA ValuePattern/TextPattern
+  exit 0 ok | 2 arg | 3 env | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; NAME=""; IDX=0; TEXT=""; TF=""; REAL=0; VERIFY=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --index) IDX="$2"; shift 2 ;;
+    --text) TEXT="$2"; shift 2 ;;
+    --text-file) TF="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    --no-verify) VERIFY=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[ -n "$TEXT" ] || [ -n "$TF" ] || { usage >&2; exit 2; }
+[ -n "$TF" ] && TEXT="$(cat "$TF")"
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")" || exit $?
+H="$((H))"   # jq --argjson does not accept 0x hex
+NODE="$(op_find_node "$H" "$NAME" "Edit|Document" "$IDX" 8 2000)" || op_die EXEC_UIA "wuia failed for hwnd $H"
+[ -n "$NODE" ] || op_die ENV_NO_NODE "no edit control matched (hwnd=$H name=$NAME)"
+
+CX="$(printf '%s' "$NODE" | jq -r '(.rect.x + (.rect.w/2|floor))|floor')"
+CY="$(printf '%s' "$NODE" | jq -r '(.rect.y + (.rect.h/2|floor))|floor')"
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT=dryrun
+  jq -nc --argjson h "$H" --argjson n "$NODE" --argjson x "$CX" --argjson y "$CY" --arg t "$TEXT" \
+    '{ok:true,dry_run:true,tool:"ops/fill",hwnd:$h,node:$n,point:{x:$x,y:$y},text_len:($t|length),text:$t}'
+  exit 0
+fi
+
+op_pause_gate input
+
+# Activate first: Windows refuses a click on an occluded window (winput never clicks blind).
+if ! bash "$REPO_DIR/bin/wwin" focus --hwnd "$H" >/dev/null; then
+  WA_AUDIT_RESULT=ENV_NOT_FOREGROUND
+  op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground"
+fi
+
+CJ="$(bash "$REPO_DIR/bin/winput" click "$CX" "$CY" --expect-hwnd "$H" --yes --focus)" || {
+  CODE="$(printf '%s' "$CJ" | jq -r '.code // "EXEC_CLICK_FAILED"')"
+  WA_AUDIT_RESULT="$CODE"; printf '%s\n' "$CJ"; exit 5
+}
+bash "$REPO_DIR/bin/winput" key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1 || true
+TJ="$(bash "$REPO_DIR/bin/winput" type --text "$TEXT" --expect-hwnd "$H" --yes)" || {
+  CODE="$(printf '%s' "$TJ" | jq -r '.code // "EXEC_TYPE_FAILED"')"
+  WA_AUDIT_RESULT="$CODE"; printf '%s\n' "$TJ"; exit 5
+}
+
+READBACK=""; MATCH=false
+if [ "$VERIFY" -eq 1 ]; then
+  RJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --value)" || true
+  READBACK="$(printf '%s' "$RJ" | jq -r '.value // empty' 2>/dev/null)"
+  if [ "$READBACK" = "$TEXT" ]; then MATCH=true; fi
+fi
+WA_AUDIT_RESULT=ok
+jq -nc --argjson h "$H" --argjson n "$NODE" --arg t "$TEXT" --arg r "$READBACK" \
+  --argjson m "$MATCH" --argjson v "$VERIFY" \
+  '{ok:true,injected:true,tool:"ops/fill",hwnd:$h,node:$n,text_len:($t|length),verify:$v,readback:$r,matches:$m}'
+exit 0
