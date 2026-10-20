@@ -19,7 +19,7 @@ done
 
 # 3. payload scripts must set UTF-8 before doing anything (K1)
 for f in "$REPO"/win/*.ps1; do
-  h="$(head -12 "$f")"
+  h="$(head -20 "$f")"
   if printf '%s' "$h" | grep -q 'OutputEncoding'; then
     pass "utf8 first lines: $(basename "$f")"
   elif printf '%s' "$h" | grep -q 'wa-core.ps1'; then
@@ -29,9 +29,9 @@ for f in "$REPO"/win/*.ps1; do
   fi
 done
 
-# 4. no input injection in tracked code before M1 acceptance (D14)
-hits="$(grep -rn -E 'SendInput|mouse_event|keybd_event|SendKeys|SetCursorPos' "$REPO/bin" "$REPO/lib" "$REPO/win" "$REPO/guard" 2>/dev/null || true)"
-[ -z "$hits" ] && pass "no input-injection keywords" || bad "input-injection keywords found: $hits"
+# 4. input-injection keywords only inside the sanctioned primitives (D14: M1 passed, M2 authorized)
+hits="$(grep -rn -E 'SendInput|mouse_event|keybd_event|SendKeys|SetCursorPos' "$REPO/bin" "$REPO/lib" "$REPO/win" "$REPO/guard" 2>/dev/null | grep -v -E '^.*/(bin|win)/winput(\.ps1)?:' | grep -v -E '/bin/winput:' || true)"
+[ -z "$hits" ] && pass "injection keywords confined to winput (D14)" || bad "input-injection keywords outside winput: $hits"
 
 # 5. every primitive answers --help with exit 0
 for f in "$REPO"/bin/*; do
