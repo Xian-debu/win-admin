@@ -38,3 +38,5 @@
 | K31 | alt+F4 用合成按键只弹出保存提示，不等于关闭；行为随应用而异 | M4 实测 | 🟢 关闭统一走 `wwin close`（PostMessage WM_CLOSE），存不存交给应用 |
 | K32 | `jq '.desktop.secured // true'` 在 `secured=false` 时也返回 `true`：jq 的 `//` 把 `false` 当空值 | M5：`tests/check-m5.sh` 明明解锁却连两次 SKIP E8 | 🟢 布尔字段直接读，缺失才 fail-closed 当 true |
 | K33 | `tests/check-m4.sh` 的 N5（找不到控件）原先放在开窗之前，实际拿到的是 `ENV_NO_WINDOW` | M4 首次跑：N5 假阴性 | 🟢 阴性用例同样有前置条件；N5 移到 C8-1 之后 |
+| K34 | 测试套件可能把自己的授权令牌留在 `~/.dsh/win-admin/grant.json`（清理逻辑依赖 `HAD_GRANT` 分支，备份缺失时 `mv` 失败就静默留下） | M5 收尾：发现一个 30 分钟有效的残留令牌（note 指向 check-m2） | 🟢 cleanup 改成「有备份就还原，没备份就删」，并在 `check-m5` 加 E5 残留断言 |
+| K35 | `tests/check-m4.sh` 的 N1 用例把授权令牌暂存在 `$GB`（m4-bak），而恢复条件写成 `HAD_GRANT=1`：套件**自己**签发令牌时 `HAD_GRANT=0`，N1 之后令牌就再也不回来 → 全后续用例 rc=4 | 补上 K34 清理后 m4 首次独立运行 9 项 FAIL（`N2 rc=4 GUARD_NO_GRANT`）；此前一直靠 m3 遗留的令牌侥幸通过 | 🟢 N1 改用独立暂存路径 `grant.json.m4-n1`，无条件还原；阴性用例不得复用 cleanup 的备份槽 |

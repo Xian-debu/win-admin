@@ -16,11 +16,14 @@
 - E1 提交前缀白名单缺 `ops`（全表回归第一枪就红）；`docs/08` 的 type 表补 `ops`/`release`/`auth`。
 - `win/waopen.ps1` 缺首行 `OutputEncoding`，`check-release` 第 3 项红。
 - `jq '.desktop.secured // true'` 把 `false` 当空值 → 解锁被误判锁屏，E8 连两次 SKIP（K32）。
+- 测试套件清理逻辑按 `HAD_GRANT` 分叉，备份缺失时静默留下有效令牌（K34）；`check-m4.sh` 的 N1 复用同一备份槽，吃掉自己签发的令牌（K35）。
+- `check-m5.sh` 新增 E5 残留断言：跑前无令牌、跑后必须仍无令牌，否则 FAIL 并撤销。
 
 ### Measured
 - 全表：m1 17/0、m2 11/0、m3 20/0、m4 13/0、release pass=yes（合计 61 项断言）。
 - E8 十轮：8185–8288 ms 全绿；另一次独立十轮跑 8158–8289 ms（极差 ≤131 ms）。
 - 单次 `bash tests/check-m5.sh` → `SUMMARY pass=6 fail=0 skip=0`。
+- 冻结后复跑（A 段增 E5）→ `SUMMARY pass=7 fail=0 skip=0`；E8 十轮 8156–8774 ms。
 
 ## [0.3.0] - 2026-10-21
 
