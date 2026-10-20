@@ -13,7 +13,7 @@
 | **M0.5** | 部署包工程 | 双包布局、VERSION、bootstrap/rollback/uninstall、发布构建 | E9–E12（见 §M0.5） | 3–4h | ✅ 2026-10-21 |
 | **M1** | 只读：看得见、认得准 | `wshot` `wuia` `wwin(list)` `wdiag` | E1–E7, C1(+C1b), C2, C3 | 4–6h | ✅ 2026-10-21（17/0） |
 | **M2** | 输入：点得中、打得进 | `winput` `wclip` `wwait` `wwin(info)` | C4–C7, S7, S1/S2(部分) | 6–10h | ✅ 2026-10-21（11/0） |
-| **M3** | 守卫：授权、急停、审计 | `guard/`（grant/pause/audit/preflight） | **S1–S8 全绿** | 4–6h | ☐ |
+| **M3** | 守卫：授权、急停、审计 | `guard/` + `lib/audit.sh` + 测试钩子 | **S1–S8 全绿** | 4–6h | ✅ 2026-10-21（20/0） |
 | **M4** | 组合与技能 | `ops/` + `SKILL.md` + 端到端用例 | C8, E8, E 族回归 | 5–8h | ☐ |
 | **M5** | 稳定化 | 回归、文档定稿、性能打磨 | 全表回归 + 报告 | 2–3h | ☐ |
 | **M6** | 发布 | 打 tag、GitHub Release、迁移说明 | 干净机器复演一次 | 1–2h | ☐ |
@@ -113,19 +113,20 @@ M2 未开工前提：仓库内仍无任何注入代码（D14），`check-release
 风险：**前台锁**（Windows 拒绝后台进程抢焦点 → `AttachThreadInput`/`SetForegroundWindow` 重试策略）；
 IME 吃键 → 一律走剪贴板，不做逐字 `SendKeys`。
 
-## M3 · 守卫（可与 M2 并行，但**必须**在 M4 之前全绿）
+## M3 · 守卫（✅ 2026-10-21，20/0 绿）
 
-| # | 工作 | 产出 |
-|---|---|---|
-| 3.1 | `guard/grant.sh`（签发/撤销/查看） | 脚本 |
-| 3.2 | `guard/check.sh`（被所有写操作调用：scope/过期/pause） | 脚本 |
-| 3.3 | 审计写入（`audit/*.jsonl`，一行一动作） | 库 |
-| 3.4 | 锁屏检测（`OpenInputDesktop` / `WTSQuerySessionInformation`） | 原语内建 |
-| 3.5 | UAC 检测（`Consent.exe` / 安全桌面） | 原语内建 |
-| 3.6 | （已定：不做）F12 常驻急停 → 改用软急停 `pause.flag`，D7 已改 | — |
-| 3.7 | S1–S8 验收报告 | 报告 |
+| # | 工作 | 产出 | 状态 |
+|---|---|---|---|
+| 3.1 | `guard/grant.sh`（issue/status/revoke/pause/resume，note 必填） | 脚本 | ✅ |
+| 3.2 | `guard/check.sh`（scope/过期/撤销/pause/验签） | 脚本 | ✅ |
+| 3.3 | 审计写入（`lib/audit.sh`，一行一动作，fail closed） | 库 | ✅ |
+| 3.4 | 锁屏检测（`OpenInputDesktop`，钩子断言） | 原语内建 | ✅ |
+| 3.5 | UAC/安全桌面检测（桌面名 `Winlogon`/`Secure` → `UAC_SECURE_DESKTOP`） | 原语内建 | ✅ |
+| 3.6 | （已定：不做）F12 常驻急停 → 软急停 `pause.flag`（D7） | — | 按决策取消 |
+| 3.7 | S1–S8 验收报告 | `tests/reports/2026-10-21-m3.md` | ✅ |
 
-风险：锁屏检测方法可能因 Win11 版本不同而失效 → 必须构造真实锁屏场景验证（S3），不许“读文档认为可行”。
+实现要点：grant 带 `sig` 验签（D23）；审计写失败 exit 5（D22）；钩子只能让系统更严格（D21/SG-0002）。
+风险（已落到 docs/11）：真实锁屏无法自测；桌面名映射随 Windows 版本漂移；多显示器未覆盖。
 
 ## M4 · 组合与技能
 

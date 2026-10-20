@@ -110,8 +110,10 @@ exit   : 0 成功 / 2 参数错误 / 3 环境不满足（如锁屏） / 4 权限
  "note":"用户当场说：帮我把 Edge 里那个表格导出来","revoked":false}
 ```
 
-- **谁签发**：agent 在**用户当次明确同意后**写这个文件，把用户原话摘进 `note`。
+- **谁签发**：只允许 `guard/grant.sh issue` 写；`note` 必填，必须摘用户原话（`调研 ≠ 授权`）。
 - **谁校验**：每个输入类原语启动时第一件事读它；过期 / `revoked` / scope 不含 → exit 4。
+- **签名（M3）**：`sig = sha256(`~/.dsh/win-admin/.grantkey` + `jq -cS '{issued,expires,scope,note,revoked}'`)`；
+  缺 key / 缺 sig / 不匹配 → `GUARD_TAMPERED` exit 4。挡误改与事故，**不**挡同用户恶意进程（D23）。
 - **为什么不用系统权限**：本会话已是 `danger-full-access`，系统层拦不住任何东西；
   令牌的意义是**留痕 + 给用户一个真能拧的旋钮**（删文件即撤销）。
 
@@ -120,23 +122,31 @@ exit   : 0 成功 / 2 参数错误 / 3 环境不满足（如锁屏） / 4 权限
 | 通道 | 机制 | 生效范围 |
 |---|---|---|
 | 软（随时可用） | 存在 `pause.flag` 就拒绝执行输入 | 每个原语读一次；用户/agent 都能建这个文件 |
-| 硬（M3，需 G4/G3） | 全局热键 `F12` → 写 `pause.flag` | 常驻小进程；热键冲突需先问用户（Q4） |
+| 硬 | **不做**（用户确认「急停就按你说的」，D7 / Q4 关闭） | — |
 
-**软通道已足够应急**：用户在终端敲一句 `touch ~/.dsh/win-admin/pause.flag`，
-或 agent 自己触发，下一个原语立刻停。硬通道只是为了"手离开键盘也能停"。
+**软通道是唯一通道**：用户在终端敲一句 `touch ~/.dsh/win-admin/pause.flag`，
+或 agent 自己触发，下一个原语立刻停。代价是"手离开键盘时停不了"——这是用户明确选择。
 
-### 5.3 审计 `~/.dsh/win-admin/audit/YYYY-MM.jsonl`
+### 5.3 审计 `~/.dsh/win-admin/audit/YYYY-MM-DD.jsonl`
 
-一次动作一行，只追加：
+一次动作一行，只追加（实现见 `lib/audit.sh`）：
 
 ```json
-{"ts":"...","tool":"winput.click","args":{"x":512,"y":300},"target":{"hwnd":1234,"title":"Edge"},
- "grant":"...","result":"ok","dur_ms":412}
+{"ts":"2026-10-21T00:58:03+08:00","ts_epoch_ms":1792515483210,"tool":"winput",
+ "args":["click","1200","880","--yes"],"result":"GUARD_NO_GRANT","exit":4,"duration_ms":112,
+ "grant":{"expires":null,"note":null},"pid":40231,"version":"0.1.0"}
 ```
 
-- 输入类动作 **必写**（含被拒的，`result:"denied"`）。
-- 只读类动作写"秒级折叠"摘要（避免每张截图一行刷爆）。
-- 拒写：审计文件本身不允许被原语修改，只能追加。
+- `bin/winput` 的**每条退出路径**都落一行（ok / dryrun / ARG_* / ENV_* / GUARD_*），用 EXIT trap 保证。
+- **fail closed**：审计写失败且动作原本成功 → 退出码强制 5（`EXEC_AUDIT_FAILED`），宁可不动。
+- `guard/grant.sh` 的 issue/revoke/pause/resume 也各记一行（`tool:"grant"`）。
+- 限制：账本是事后证据，同用户可删改（D22）。
+
+### 5.4 测试钩子（只让系统更严格）
+
+`C:/Users/Public/win-admin/tmp/force-desktop.txt`：内容非空且 ≠ `Default` 时，
+`Get-WaDesktopInfo` 直接判为"已锁定/安全桌面"（`reason:"test-hook"`）。
+只能声明一个**非 Default** 桌面名，永远不能把真实锁屏覆盖成可用；仅 `tests/check-m3.sh` 使用（D21 / SG-0002）。
 
 ## 6. L2 · 组合操作（M4）
 

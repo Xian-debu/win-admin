@@ -23,3 +23,9 @@
 | K16 | 事件处理器（Loaded/TextChanged/KeyDown）里访问外层局部变量全是 `$null` | M2 的 B3 | 🟢 跨回调状态一律 `$script:xxx`（D20）；测试窗已改 |
 | K17 | WinForms `TextBox` 既无 ValuePattern 也无 TextPattern，`wuia --value` 会报 `ENV_NO_VALUE_PATTERN` | M2 的 B4 | 🟡 判据优先选 WPF 控件；遇到 WinForms 改走「Ctrl+A Ctrl+C + wclip get」兜底 |
 | K18 | 陈旧测试窗实例共用同一 JSON 路径，读到空/旧数据 | M2 的 B5 | 🟢 `testwin-stop.sh` 按 JSON 里的 pid 精确杀，起窗前先 stop |
+| K19 | Linux 环境变量不会传给 WSL 启动的 Windows 进程，靠 env 传测试开关永远无效 | M3：`WA_TESTING=1` 在 payload 里读到空字符串 | 🟢 改走 Windows 可见的文件钩子 `tmp/force-desktop.txt`（D21/SG-0002） |
+| K20 | `winput` 的 guard 拒绝路径曾绕过审计（直接 `exit`，EXIT trap 未设 result），S5 会少数一行 | M3 自查：第一条审计只记了 payload 路径 | 🟢 所有早退路径先 `WA_AUDIT_RESULT=...`，EXIT trap 统一落账（D22） |
+| K21 | UAC/锁屏的拒绝码依赖输入桌面名文案（`Winlogon`/`Secure`），Windows 大版本可能改文案 | 机制实测 `Default` 正常；改名后映射会退回 `SESSION_LOCKED`（仍然是拒绝，但码不准） | 🟡 保守默认「拒绝」而非「放行」；升级 Windows 后重跑 `tests/check-m3.sh` |
+| K22 | 审计与 grant 都存放在同用户可写的 `~/.dsh/win-admin/`，同用户进程可删改/伪造 | D23 的设计限制（签名只防误改，key 同用户可读） | 🔴 真隔离需独立账户或系统服务（G4），本轮明确不做 |
+| K23 | 全屏像素比对不可用：桌面有动画元素，两张相隔 1s 的截图差 8185 px | M3：S1 初版全屏 diff 失败 | 🟢 `pixdiff.py --rect` 只比动作会影响的区域，S1 diff=0 |
+| K24 | 显示配置会变（M2 时 2560×1600，M3 时 1920×1080，且出现两块活动面板），任何写死坐标的脚本都会点错 | M3 环境快照：内屏 CSW1656 + 外接 TCL03D4 | 🟡 一切坐标从 `wdiag.screen` / `wwin info` 动态取；多屏负坐标场景仍未覆盖（Q3） |

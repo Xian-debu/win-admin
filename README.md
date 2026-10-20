@@ -1,6 +1,6 @@
 # win-admin · 让 WSL 里的 DSH 在授权窗口内操作 Windows 桌面
 
-> **当前状态：M2 已完成（2026-10-21）。可截图、读控件树、点、打、拖、等——全部默认拒绝、默认 dry-run。下一步 M3（守卫硬化）。**
+> **当前状态：M3 已完成（2026-10-21）。可截图、读控件树、点、打、拖、等；输入默认拒绝、默认 dry-run；每个动作都记账，令牌带签名，锁屏/UAC 直接拒绝。下一步 M4（复合操作 + 技能）。**
 >
 > 一句话：不是"给 agent 开个后门"，而是**一套带刹车、带行车记录仪、见过反例的工具箱**。
 
@@ -24,12 +24,12 @@
 | 03 | [插件审计结论](docs/03-plugin-review.md) | 那个插件到底干了什么、为什么不用、借鉴了什么 | 冻结 |
 | 04 | [能力矩阵](docs/04-capability-matrix.md) | 四层能力（命令/文件/GUI/视觉）现状、缺口、里程碑归属、八条坑 | 活文档 |
 | 05 | [架构设计](docs/05-architecture.md) | 五层架构、无状态原语的选择依据、JSON 契约、守卫层、端到端数据流 | 冻结 |
-| 06 | [决策记录](docs/06-decisions.md) | D1–D14：为什么这么选、否掉了什么、何时该推翻 | 现行 |
+| 06 | [决策记录](docs/06-decisions.md) | D1–D23：为什么这么选、否掉了什么、何时该推翻 | 现行 |
 | 07 | [验收标准](docs/07-acceptance.md) | **冻结件**：E1–E8 / C1–C8 / S1–S8 共 24 条判据 + 里程碑门槛 | 冻结 |
 | 08 | [工程规范](docs/08-conventions.md) | 目录归属、提交规范、证据规则、坐标编码铁律、原语模板、DoD | 现行 |
 | 09 | [路线图](docs/09-roadmap.md) | M0–M6 里程碑、工作项、风险、G1–G5 授权点 | 现行（M0/M0.5/M1 已完成） |
 | 10 | [部署包](docs/10-deployment.md) | 两个包装到哪、怎么升级回滚卸载、怎么打发布物 | 现行 |
-| 11 | [已知问题](docs/11-known-issues.md) | K1–K14：每条都有实测证据与修复状态 | 活文档 |
+| 11 | [已知问题](docs/11-known-issues.md) | K1–K24：每条都有实测证据与修复状态 | 活文档 |
 
 ## 目录结构
 
@@ -57,9 +57,9 @@ win-admin/
 
 | 层 | 机制 | 用户怎么用 |
 |---|---|---|
-| 授权 | `~/.dsh/win-admin/grant.json`（30 分钟窗口 + scope + 用户原话摘录） | 删文件 = 立即撤销 |
-| 急停 | `touch ~/.dsh/win-admin/pause.flag`（M3 起每个输入原语先读） | 敲一行就停；M3 再加 F12 硬通道 |
-| 审计 | `~/.dsh/win-admin/audit/YYYY-MM.jsonl`（一行一动作，含被拒的） | `jq` 查我到底干了什么 |
+| 授权 | `~/.dsh/win-admin/grant.json`（时间窗 + scope + 用户原话 + **签名**） | 删文件 = 立即撤销；改内容 = `GUARD_TAMPERED` |
+| 急停 | `touch ~/.dsh/win-admin/pause.flag` | 敲一行就停（软通道是唯一通道，用户已确认 D7） |
+| 审计 | `~/.dsh/win-admin/audit/YYYY-MM-DD.jsonl`（一行一动作，含被拒的；写失败则动作失败） | `jq` 查我到底干了什么 |
 
 ## 关键实测事实（`docs/02` §7 有复跑记录）
 
@@ -99,9 +99,10 @@ bash bin/wuia --hwnd 0x108c6 --value | jq -r .value                            #
 bash bin/wclip get                                                             # 剪贴板
 bash guard/grant.sh revoke                                                     # 撤销
 
-# 5) 验收（M1 17 项 / M2 11 项，全绿才算过）
+# 5) 验收（M1 17 项 / M2 11 项 / M3 20 项，全绿才算过）
 bash tests/check-m1.sh
 bash tests/check-m2.sh
+bash tests/check-m3.sh
 
 # 6) 部署工程自检 / 回退 / 卸载
 bash scripts/check-release.sh
@@ -120,7 +121,7 @@ bash scripts/uninstall.sh --yes
 | M0.5 ✅ | 双包部署工程（bootstrap/rollback/uninstall/可复现构建） | E9–E12 | 2026-10-21 |
 | M1 ✅ | 只读：`wshot` `wuia` `wwin list` `wdiag` | E1–E7, C1–C3（17/0 绿） | 2026-10-21 |
 | M2 ✅ | 输入：`winput` `wclip` `wwait` `wwin info` | C4–C7, S7（11/0 绿） | 2026-10-21 |
-| M3 | 守卫：令牌 / 急停 / 审计 / 锁屏与 UAC 检测 | **S1–S8 全绿** | 4–6h |
+| M3 ✅ | 守卫：令牌签名 / 软急停 / 审计账本 / 锁屏与 UAC 拒绝 | S1–S8（20/0 绿） | 2026-10-21 |
 | M4 | 组合操作 + `SKILL.md` + 端到端 | C8, E8 | 5–8h |
 | M5 | 稳定化与冻结 | 全表回归 | 2–3h |
 
@@ -128,7 +129,7 @@ bash scripts/uninstall.sh --yes
 
 | 事件 | 门 |
 |---|---|
-| 开始 M3 实施（审计日志、锁屏/UAC 拒绝、令牌不可篡改） | **用户授权开工**（M2 已交付，等下一步指令） |
+| 开始 M4 实施（`ops/` 复合操作 + `SKILL.md` + 端到端 C8） | 夜间自主授权已覆盖（`docs/12`、SG-0001），早晨一并复核 |
 | 装任何 Windows Python 包 | G1（当前设计不需要） |
 | 常驻急停进程 / 全局热键 / 自启 | G4 + G3（可跳过，软急停够用） |
 | 删除/覆盖既有产物 | G5 |
@@ -136,5 +137,6 @@ bash scripts/uninstall.sh --yes
 ## 已知长期风险
 
 - **前台锁**：Windows 可能拒绝后台进程抢焦点，输入打到别的窗口（M2 必须校验前台）。
-- **锁屏检测**：Win11 版本差异可能让 `OpenInputDesktop` 口径失效（M3 必须真实锁屏验证）。
+- **锁屏检测**：Win11 版本差异可能让拒绝码文案漂移（K21）；真锁屏无法自测，用只能更严格的钩子断言。
+- **审计不可篡改**：同用户进程可删改账本（K22）；真隔离需独立账户/系统服务，本轮明确不做。
 - ~~视觉通道未定（Q1）~~：**已预验通过**（2026-10-20），模型可读截图文字；但像素级精度仍归 UIA。

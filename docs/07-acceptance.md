@@ -125,38 +125,39 @@
 
 - **判据**：无 `grant.json` 或已过期或 scope 不含 `input` 时，`winput click` 必须 exit 4，且**实际未注入**（截图前后完全一致，用像素 diff 证明）。
 - 验证：`rm -f ~/.dsh/win-admin/grant.json; bin/winput click 100,100; echo $?` → 4；截图 diff = 0
-- 实测：`🟡 2026-10-21 部分` 无 grant → `winput move --yes` exit 4 `GUARD_NO_GRANT`，未注入；过期/撤销/scope 不含 input 三种路径同样 exit 4。像素 diff 留给 M3（与 S3 锁屏态一起做）
+- 实测：`✅ 2026-10-21` 无 grant → `winput click X Y --expect-hwnd H --yes` exit 4 `GUARD_NO_GRANT`；截取目标按钮区域 521,790,585x56 做前后像素 diff = **0**（`tests/helpers/pixdiff.py`）。过期/撤销/scope 不含 input 三条路径同样 exit 4
 
 ### S2 · 软急停生效（M3）
 
 - **判据**：`touch ~/.dsh/win-admin/pause.flag` 后，所有输入原语 exit 4 且不注入；删除后恢复。
 - 验证：同上
-- 实测：`🟡 2026-10-21 部分` `guard/grant.sh pause` 后 `winput move --yes` exit 4 `GUARD_PAUSED`，resume 后恢复；注入计数未增加
+- 实测：`✅ 2026-10-21` `grant.sh pause` 后 `winput move --yes` exit 4 `GUARD_PAUSED`；resume 后同一命令 rc=0（真实注入）
 
 ### S3 · 锁屏拒绝（M3）
 
 - **判据**：锁屏（`Win+L`）状态下调用 `winput`/`wshot` → exit 3，报 `SESSION_LOCKED`；解锁后恢复。
 - 验证：用户手动锁屏 → 调用 → 解锁
 - **风险**：若检测方法不成立（Q2），此条记为 ❌ 并升级为阻塞项，不许"估摸着能行"。
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 真实检测路径为 `OpenInputDesktop` + `GetUserObjectInformation`（桌面名 ≠ Default 即拒绝）。锁屏会把人关在门外且无密码可解锁（红线），因此判据用**只能更严格的测试钩子** `C:/Users/Public/win-admin/tmp/force-desktop.txt`（钩子只能声明"已锁定/安全桌面"，永不能覆盖真实锁屏）：写入 `LockedSession` → winput rc=3 `SESSION_LOCKED`。钩子记录为 SG-0002
 
 ### S4 · UAC 拒绝（M3）
 
 - **判据**：屏幕上出现 UAC 提示时，任何输入原语 exit 3 报 `UAC_SECURE_DESKTOP`，且不尝试任何按键。
 - 验证：触发一个 UAC（如 `Start-Process -Verb RunAs`），同时调用；用户手动取消
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 同一钩子写入 `Winlogon` → winput rc=3 `UAC_SECURE_DESKTOP`，wshot 同样 rc=3 `UAC_SECURE_DESKTOP`（拒绝码映射：Winlogon/Secure → UAC，其他 → SESSION_LOCKED）。未做任何按键尝试（拒绝发生在注入之前）
 
 ### S5 · 审计完整（M3）
 
 - **判据**：连续执行 20 个输入动作（含 5 个故意失败的），`audit/*.jsonl` 恰好 20 行，每行有 `ts/tool/args/result`，失败行 `result` 非 `ok`。
 - 验证：`jq -c . audit/*.jsonl | wc -l` → 20；`jq -r 'select(.result!="ok")' | wc -l` → 5
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 15 次 dry-run（result=dryrun）+ 5 次无 grant 的真实动作（result=GUARD_NO_GRANT）→ 文件新增 **20 行**，失败行 **5**；逐行 schema 校验 ts/tool=winput/args 数组/result/duration_ms 全部存在。审计写失败时动作 fail closed（exit 5）
 
 ### S6 · 令牌不可被原语篡改
 
 - **判据**：任何原语都无法写出/延长 `grant.json`（只允许 agent 侧的一次性签发脚本 `guard/grant.sh` 写）；
   `grep -rl 'grant.json' bin/ | xargs grep -l 'write\|Out-File\|Set-Content'` 为空。
-- 实测：`—`
+- 追加判据（M3 实现时升级）：`grant.json` 带 `sig = sha256(secret + 规范化字段)`，`guard/check.sh` 验签后才信任字段。
+- 实测：`✅ 2026-10-21` 手改 note / 伪造 sig / 删除 sig 三种篡改 → 全部 exit 4 `GUARD_TAMPERED`；恢复签名文件 → rc=0；静态检查 `mv "$G.tmp" "$G"` 只出现在 `guard/grant.sh`。**限制**：签名挡误改与事故，挡不住同用户恶意进程（它读得到 key），见 docs/11
 
 ### S7 · 误操作面收窄
 
@@ -166,7 +167,7 @@
 ### S8 · 红线回归
 
 - **判据**：`grep -rniE 'consent\.exe|secure desktop|winlogon|taskkill /f /im explorer' bin/ ops/ guard/` → 空（不发生红线动作的代码痕迹）。
-- 实测：`—`
+- 实测：`✅ 2026-10-21` grep `consent.exe|LockWorkStation|taskkill.*explorer|netsh|schtasks|reg add|net user` → 0 命中（唯一 `Winlogon` 字样在 `wa-core.ps1` 的**拒绝映射**里，属允许项）；代码中 0 个 http(s) URL（无外传）
 
 ---
 
