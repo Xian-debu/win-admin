@@ -1,0 +1,61 @@
+# 修复验证 · 2026-10-20 23:41（只读）
+
+> 针对 docs/02 §2（DPI 双坐标）与 §4.2（中文乱码）两条坑，做的最小验证。
+> 两条都**当场成立**，结论已回写 docs/02 与 docs/06 D4/D10。
+
+## V1 · winps stdin 模式下的中文乱码修正
+
+现象（probe 原始输出 §6）：窗口标题全是 `����Ա����о�` 形态。
+原因：`winps` 的 PROLOG（`[Console]::OutputEncoding=UTF8`）只在 **inline 模式**注入；
+stdin/-f 模式走 `-File`，PROLOG 不生效 → PowerShell 5.1 用 OEM 代码页 936 写 stdout。
+
+命令：
+
+```bash
+printf '%s\n' \
+  '[Console]::OutputEncoding=[Text.Encoding]::UTF8' \
+  '$OutputEncoding=[Text.Encoding]::UTF8' \
+  'Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes' \
+  '$r=[System.Windows.Automation.AutomationElement]::RootElement' \
+  '$c=New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::Window)' \
+  '$w=[System.Windows.Automation.TreeScope]::Children' \
+  '$r.FindAll($w,$c) | ForEach-Object { $_.Current.Name } | ConvertTo-Json -Compress' \
+| winps -t 40 -
+```
+
+输出（原样）：
+
+```json
+["ASUSMascot","DSH管理员插件研究与接管PC可行性 — DeepSeek Harness 和另外 4 个页面 - 用户配置 1 - Microsoft Edge","*请仔细提取此次实践的经验，此次是超长任务，且涉及跨多会话，涉及的会话i - Notepad","此电脑 - 文件资源管理器","ds","任务管理器","cs1 - 文件资源管理器","swift-IQ2_XS - 文件资源管理器","cs1 - 文件资源管理器","HypoMux"]
+```
+
+**结论**：中文完整。规则固化 —— 凡是走 `winps -` / `winps -f` 的脚本，
+**第一行必须是** `[Console]::OutputEncoding=[Text.Encoding]::UTF8`。写进 docs/08 §4.2。
+
+## V2 · DPI 感知能否拿到物理分辨率
+
+未声明时（probe §3/§5）：`VirtualScreen = 1707x1067`，截图 1707x1067。
+
+命令：
+
+```powershell
+Add-Type @"
+using System.Runtime.InteropServices;
+public class D { [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(System.IntPtr v); }
+"@
+[D]::SetProcessDpiAwarenessContext([System.IntPtr]-4) | Out-Null
+Add-Type -AssemblyName System.Windows.Forms,System.Drawing
+$b=[System.Windows.Forms.SystemInformation]::VirtualScreen
+[pscustomobject]@{w=[int]$b.Width;h=[int]$b.Height} | ConvertTo-Json -Compress
+```
+
+输出：
+
+```json
+{"w":2560,"h":1600}
+```
+
+**结论**：`SetProcessDpiAwarenessContext(-4)`（PER_MONITOR_AWARE_V2）在 PowerShell 5.1 内可用，
+声明后拿到 2560×1600 物理像素，与 `Win32_VideoController` 一致。
+**但**：`-4` 需要 Win10 1703+（本机 26100 满足）；老系统需回退 `SetProcessDPIAware()`。
+这条是 D4 的可执行依据，M1 的 `wshot`/`wdiag` 直接采用。

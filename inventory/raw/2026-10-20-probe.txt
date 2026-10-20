@@ -1,0 +1,34 @@
+# probe-env 2026-10-20T23:38:23+08:00
+
+## 1 WSL ä¾§
+kernel: 5.15.133.1-microsoft-standard-WSL2
+host:   LAPTOP-8USU1IEJ
+distro: Ubuntu 24.04.4 LTS
+DISPLAY=[] WAYLAND=[]
+/mnt/c æŒ‚è½½: 1 æ¡
+tools: powershell.exe=/usr/local/bin/powershell.exe  winps=/usr/local/bin/winps
+
+## 2 Windows åŸºç¡€
+{"Caption":"Microsoft Windows 11 ×¨Òµ°æ","Version":"10.0.26100","BuildNumber":"26100"}
+{"Manufacturer":"ASUSTeK COMPUTER INC.","Model":"TX Gaming FX608LP_FX608LP","UserName":"LAPTOP-8USU1IEJ\\ZYX"}
+
+## 3 æ˜¾ç¤ºä¸ DPI
+[{"Name":"Intel(R) Graphics","CurrentHorizontalResolution":2560,"CurrentVerticalResolution":1600},{"Name":"NVIDIA GeForce RTX 5070 Laptop GPU","CurrentHorizontalResolution":null,"CurrentVerticalResolution":null}]
+{"Device":"\\\\.\\DISPLAY1","Primary":true,"Bounds":"1707x1067@0,0"}
+{"VirtualScreen":"1707x1067"}
+
+## 4 ä¼šè¯
+{"SessionId":1,"ExplorerSession":1}
+
+## 5 æˆªå›¾èƒ½åŠ›ï¼ˆä¸´æ—¶æ–‡ä»¶ï¼Œæ¢æµ‹ååˆ é™¤ï¼‰
+{"w":1707,"h":1067,"file":"C:\\Users\\Public\\win-admin\\tmp\\probe.png"}
+shot_bytes: 137691
+
+## 6 UI Automation é¡¶å±‚çª—å£
+{"count":10,"names":["ASUSMascot","DSH¹ÜÀíÔ±²å¼şÑĞ¾¿Óë½Ó¹ÜPC¿ÉĞĞĞÔ ¡ª DeepSeek Harness ºÍÁíÍâ 4 ¸öÒ³Ãæ - ÓÃ»§ÅäÖÃ 1 - Microsoft? Edge","*Çë×ĞÏ¸ÌáÈ¡´Ë´ÎÊµ¼ùµÄ¾­Ñé£¬´Ë´ÎÊÇ³¬³¤ÈÎÎñ£¬ÇÒÉæ¼°¿ç¶à»á»°£¬Éæ¼°µÄ»á»°i - Notepad","´ËµçÄÔ - ÎÄ¼ş×ÊÔ´¹ÜÀíÆ÷","ds","ÈÎÎñ¹ÜÀíÆ÷","cs1 - ÎÄ¼ş×ÊÔ´¹ÜÀíÆ÷","swift-IQ2_XS - ÎÄ¼ş×ÊÔ´¹ÜÀíÆ÷","cs1 - ÎÄ¼ş×ÊÔ´¹ÜÀíÆ÷","HypoMux"]}
+
+## 7 Windows Python ä¸ PIL
+py 3.11.9 PIL 12.2.0
+
+## 8 å®Œæˆ
+cwd: /root/win-admin

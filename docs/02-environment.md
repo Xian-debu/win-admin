@@ -73,9 +73,12 @@ $root.FindAll([System.Windows.Automation.TreeScope]::Children,$cond)
 ```
 
 结果：枚举到 **10 个顶层窗口**（Edge / Notepad / 资源管理器 / 任务管理器 / Windows Terminal 等）。
-**注意**：输出中文为乱码，原因是 PowerShell 5.1 默认 GBK 输出 + 管道未指定编码，
-`winps` 的 `iconv UTF-16LE` 只处理 UTF-16 流。修法：脚本内显式
-`[Console]::OutputEncoding=[Text.Encoding]::UTF8` 并 `Out-String -Width`，或输出 JSON 后 `ConvertTo-Json`。
+**注意（已定位并修好，见 `inventory/raw/2026-10-20-fix-verify.txt` V1）**：
+中文乱码的真因不是"PS 默认 GBK"这么笼统——是 `winps` 的 PROLOG
+（`[Console]::OutputEncoding=UTF8`）**只在 inline 模式注入**；`winps - ` / `-f` 走 `-File`，PROLOG 不生效，
+PowerShell 5.1 于是用 OEM 代码页 936 写 stdout。
+修法：stdin/-f 脚本**第一行**写 `[Console]::OutputEncoding=[Text.Encoding]::UTF8`，
+并统一 `ConvertTo-Json -Compress`。实测窗口名 10/10 完整中文，无乱码。
 
 ### 4.3 合成输入（来自既有技能实测，尚未在本项目复测）
 
@@ -106,3 +109,32 @@ $root.FindAll([System.Windows.Automation.TreeScope]::Children,$cond)
 | Q2 | 锁屏/断开会话的检测口径（`OpenInputDesktop` 失败？`WTSQuerySessionInformation`？） | 决定红线 2 能否实现 | M3 验收前 |
 | Q3 | 多显示器将来接入时的坐标模型 | 影响所有原语的坐标系设计 | 出现第二块屏时 |
 | Q4 | 全局急停热键（F12）是否与用户既有工具冲突 | 决定急停实现方式 | M3 前问用户 |
+
+## 7. 复现验证记录
+
+### 7.1 环境数字复跑（2026-10-20 23:38）
+
+命令：`bash inventory/scripts/probe-env.sh`，原始输出 `inventory/raw/2026-10-20-probe.txt`。
+
+| 项 | 本文档记录 | 复跑实测 | 一致 |
+|---|---|---|---|
+| 内核 | 5.15.133.1-microsoft-standard-WSL2 | 同 | ✅ |
+| Windows | 10.0.26100 | `10.0.26100`（Build 26100） | ✅ |
+| 机型 | TX Gaming FX608LP | `TX Gaming FX608LP_FX608LP`（ASUSTeK） | ✅ |
+| 物理分辨率 | 2560×1600 | Intel Graphics 报 2560×1600（NVIDIA 报 null，屏接在集显上） | ✅ |
+| 逻辑分辨率 | 1707×1067 | `DISPLAY1 1707x1067@0,0`，VirtualScreen 1707x1067 | ✅ |
+| 交互会话 | SessionId=1 | `{"SessionId":1,"ExplorerSession":1}` | ✅ |
+| 顶层窗口数 | 10 | `{"count":10}` | ✅ |
+| 截图 | 1707×1067 | `{"w":1707,"h":1067}`，137,691 B（画面内容与首测不同，字节数自然不同） | ✅ |
+| Python/PIL | 3.11.9 / 12.2.0 | `py 3.11.9 PIL 12.2.0` | ✅ |
+
+### 7.2 两条坑的修复验证（2026-10-20 23:41）
+
+原始输出：`inventory/raw/2026-10-20-fix-verify.txt`
+
+| 验证 | 结论 |
+|---|---|
+| V1 中文编码 | stdin/-f 脚本首行加 `[Console]::OutputEncoding=[Text.Encoding]::UTF8` 后，10 个窗口标题中文完整（"此电脑 - 文件资源管理器" 等） |
+| V2 DPI 感知 | `SetProcessDpiAwarenessContext([IntPtr]-4)` 后 VirtualScreen 由 1707×1067 变为 **2560×1600**，与物理分辨率一致 |
+
+**这两条把 D4（物理像素单坐标）与 D10（UTF-8 强制）从"设计意图"升级为"已实测可执行"。**
