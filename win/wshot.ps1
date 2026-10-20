@@ -14,7 +14,7 @@ try {
     $dpiMode = Set-WaDpi
     $desk = Get-WaDesktopInfo
     if ($desk.secured) {
-        Write-WaFail 'ENV_SECURE_DESKTOP' "input desktop unavailable: $($desk.reason)"
+        Write-WaFail (Get-WaBlockCode $desk 'ENV_SECURE_DESKTOP') "input desktop unavailable: $($desk.reason)"
         exit 3
     }
     $screen = Get-WaScreen

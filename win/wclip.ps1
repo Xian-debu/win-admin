@@ -6,8 +6,8 @@ param(
     [string]$TextFile = ''
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-. $Core
 $env:WA_VERSION = $Version
+. $Core
 Set-WaDpi | Out-Null
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 

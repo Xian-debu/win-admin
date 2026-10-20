@@ -70,6 +70,15 @@ function Exit-WaCode([string]$code) {
 }
 
 function Get-WaDesktopInfo {
+    # Test hook (D21): S3/S4 acceptance without locking the user out. Fail-closed by design:
+    # the hook can only claim a SECURED desktop, never override a real secured state.
+    $hook = Join-Path $env:PUBLIC 'win-admin/tmp/force-desktop.txt'
+    if (Test-Path $hook) {
+        $forced = ((Get-Content -Raw $hook) -as [string]).Trim()
+        if ($forced -and $forced -ne 'Default') {
+            return @{ secured = $true; desktop = $forced; reason = 'test-hook' }
+        }
+    }
     $h = [Wa.Native]::OpenInputDesktop(0, $false, 0x0101)
     if ($h -eq [IntPtr]::Zero) {
         return @{ secured = $true; desktop = $null; reason = 'OpenInputDesktop failed' }
@@ -80,6 +89,13 @@ function Get-WaDesktopInfo {
     [void][Wa.Native]::CloseDesktop($h)
     $name = if ($ok) { $sb.ToString() } else { $null }
     @{ secured = ($name -ne 'Default'); desktop = $name; reason = $null }
+}
+
+# Map a secured desktop to the refusal code: Winlogon/Secure desktop = UAC prompt, anything else = locked session.
+function Get-WaBlockCode($desk, [string]$default = 'SESSION_LOCKED') {
+    if (-not $desk -or -not $desk.secured) { return $null }
+    if ($desk.desktop -match 'Winlogon|Secure') { return 'UAC_SECURE_DESKTOP' }
+    return $default
 }
 
 function Get-WaScreen {

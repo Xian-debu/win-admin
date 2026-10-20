@@ -15,8 +15,8 @@ param(
     [switch]$NoRestoreClip
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
-. $Core
 $env:WA_VERSION = $Version
+. $Core
 $dpi = Set-WaDpi
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
 
@@ -114,7 +114,7 @@ function Out-Plan($action, $extra) {
 
 # ---- common gates ----
 $desk = Get-WaDesktopInfo
-if ($desk.secured) { Fail 'SESSION_LOCKED' ('input desktop is not Default: ' + $desk.desktop) 3 }
+if ($desk.secured) { Fail (Get-WaBlockCode $desk) ('input desktop is not Default: ' + $desk.desktop) 3 }
 $scr = Get-WaScreen
 if (($Action -in @('move', 'click', 'dclick', 'drag', 'wheel'))) {
     if ($X -lt $scr.x -or $Y -lt $scr.y -or $X -ge ($scr.x + $scr.w) -or $Y -ge ($scr.y + $scr.h)) {
