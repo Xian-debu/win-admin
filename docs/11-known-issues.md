@@ -19,3 +19,7 @@
 | K12 | `DllImport` 不写 `CharSet.Unicode` 时，`*W` API 的 UTF-16 缓冲被按 ANSI 读 → 标题乱码、类名只剩一个字母 | M1 的 B2 | 🟢 所有 `*W` 导入显式 `CharSet = CharSet.Unicode`（D16） |
 | K13 | 经 `winps -f` 执行的脚本 `$PSScriptRoot` 是 Windows 临时目录，不是载荷目录 | M1 的 B1/B3 排查 | 🟢 载荷一律显式收 `-Core`（D15） |
 | K14 | `EnumWindows` 在本机返回 474 个顶层窗口，逐个构造信息（含 `Get-Process`）会把 `wwin` 拖到 12 s | M1 的 B4 | 🟢 先 `IsWindowVisible` + 标题非空预筛，再构造信息 → 743 ms |
+| K15 | `Out-Plan \| Out-Null` 把 dry-run 的 JSON 整块吞掉，命令"成功"但输出全 null | M2 的 B1 | 🟢 输出 JSON 的函数一律不接管道；dry-run 分支直接 `Out-Json` |
+| K16 | 事件处理器（Loaded/TextChanged/KeyDown）里访问外层局部变量全是 `$null` | M2 的 B3 | 🟢 跨回调状态一律 `$script:xxx`（D20）；测试窗已改 |
+| K17 | WinForms `TextBox` 既无 ValuePattern 也无 TextPattern，`wuia --value` 会报 `ENV_NO_VALUE_PATTERN` | M2 的 B4 | 🟡 判据优先选 WPF 控件；遇到 WinForms 改走「Ctrl+A Ctrl+C + wclip get」兜底 |
+| K18 | 陈旧测试窗实例共用同一 JSON 路径，读到空/旧数据 | M2 的 B5 | 🟢 `testwin-stop.sh` 按 JSON 里的 pid 精确杀，起窗前先 stop |

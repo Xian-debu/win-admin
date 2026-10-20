@@ -128,6 +128,24 @@
 - **依据**：早期 `-k` 留下的旧 `winps-*.ps1` 让 E5 假红；把"历史脏物"和"本次泄漏"混在一起，
   会让测试失去意义（也叫"测试自己制造失败"）。
 
+## D18 · 验收一律使用仓库自带的 WPF 测试窗，绝不在用户窗口里做实验
+
+- **决策**：`tests/helpers/testwin.ps1` 是仓库自带的 WPF 窗口（一个 TextBox + 一个 CLICK-TARGET 按钮），输入类验收全部打在它身上；用户自己的记事本/浏览器只读不写。
+- **依据**：M1 期间本机记事本里放着用户正在编辑的文本（hwnd 0x108c6，pid 27396）；一次"顺手 type 一下"就能毁掉用户的工作。验收需要可控、可复现、可反复破坏的对象，用户窗口三条都不满足。
+- **执行**：测试窗自己落盘三类证据——输入文本（testwin-text.txt）、按键（testwin-keys.txt）、点击计数（testwin-clicks.txt），使 C4/C5 的判据不完全依赖 agent 自己的返回值。
+
+## D19 · C5 的回读判据优先用 UIA ValuePattern，其次 TextPattern
+
+- **决策**：`wuia --value` 先找 ValuePattern，没有则退到 TextPattern（`DocumentRange.GetText`）。
+- **依据**：WinForms 的 TextBox 在本机实测**两种模式都没有**（只有 MSAA Name），拿它当判据会误判"输入失败"；WPF TextBox 有 ValuePattern，回读 23 字符完全一致。判据必须建立在真实可用的模式上。
+- **执行**：`wuia --value` 的返回带 `via` 字段（value/text）；两种都没有时报 `ENV_NO_VALUE_PATTERN`（exit 3），不返回空串假装成功。
+
+## D20 · WPF 事件处理器里只用 `$script:` 变量
+
+- **决策**：事件脚本块（`Add_Loaded` / `Add_TextChanged` / `Add_KeyDown`）里访问的跨回调状态，一律 `$script:xxx`。
+- **依据**：M2 实测，处理器 scriptblock 看不到外层函数的局部变量——`$win` / `$h` / `$timer` 在回调里全是 `$null`，表现为"窗口起来了但 JSON 是空的""计数器永远是 1"。此坑排查了三轮。
+- **执行**：`tests/helpers/testwin.ps1` 已全部改为 `$script:`；新写任何带 UI 事件的脚本沿用。
+
 ---
 
 ## 待定（等用户或等验证）

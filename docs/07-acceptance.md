@@ -89,25 +89,25 @@
 
 - **判据**：`winput --dry-run click X,Y` 打印的目标窗口/坐标正确；实点后**目标窗口获得焦点且截图显示点击生效**（例：点记事本编辑区 → 出现光标；点按钮 → 状态改变）。
 - 验证：`bin/wshot` → `bin/wuia` 取 rect → `winput --dry-run` → `winput click` → `bin/wshot` 对比
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 自带 WPF 测试窗（`tests/helpers/testwin.ps1`）上 dry-run 计划点=目标点（injected=false）；`--yes --focus` 连点 10 次全部 ok，窗口侧按钮计数器 10/10，时间戳连续无缺号（约 740 ms/次，含 winps 桥）。报告 `tests/reports/2026-10-21-m2.md`
 
 ### C5 · 打得进（M2）
 
 - **判据**：`winput type "Hello 世界"` 到记事本，回读文本框内容完全一致（含中文、含空格）。
 - 验证：点编辑区 → `winput type` → `wuia` 读 `ValuePattern` 或 `Ctrl+A Ctrl+C` + `wclip get`
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 样本 `Hello 世界 — 中文输入 ✅ line2`，`wuia --value`（UIA ValuePattern）回读 23 字符完全一致；测试窗自身落盘的 testwin-text.txt 也一致（独立判据）。限制：仅用 WPF TextBox 验证；WinForms TextBox 无 ValuePattern，见 D19
 
 ### C6 · 拖得动（M2）
 
 - **判据**：拖拽从 (x1,y1) 到 (x2,y2)，终点窗口位置变化符合预期（误差 ≤ 3px）。
 - 验证：`wwin layout` 记录前后 rect
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 拖 (300,150) px，`wwin info` 前后 rect 位移恰为 (300,150)，误差 (0,0) px
 
 ### C7 · 等得到（M2）
 
 - **判据**：`wait-for` 在目标出现后 200ms 内返回；超时准确报错（不假成功）。
 - 验证：启动耗时 3s 的程序，`wait-for window "X" --timeout 10s`
-- 实测：`—`
+- 实测：`✅ 2026-10-21` `wwait --title` 轮询 100 ms：目标出现后 47 ms 内返回（同轮询内钳位，要求 ≤200 ms）；超时 exit 3 + `ENV_WAIT_TIMEOUT`，无假成功。单轮询成本约 117 ms
 
 ### C8 · 端到端（M4）
 
@@ -125,13 +125,13 @@
 
 - **判据**：无 `grant.json` 或已过期或 scope 不含 `input` 时，`winput click` 必须 exit 4，且**实际未注入**（截图前后完全一致，用像素 diff 证明）。
 - 验证：`rm -f ~/.dsh/win-admin/grant.json; bin/winput click 100,100; echo $?` → 4；截图 diff = 0
-- 实测：`—`
+- 实测：`🟡 2026-10-21 部分` 无 grant → `winput move --yes` exit 4 `GUARD_NO_GRANT`，未注入；过期/撤销/scope 不含 input 三种路径同样 exit 4。像素 diff 留给 M3（与 S3 锁屏态一起做）
 
 ### S2 · 软急停生效（M3）
 
 - **判据**：`touch ~/.dsh/win-admin/pause.flag` 后，所有输入原语 exit 4 且不注入；删除后恢复。
 - 验证：同上
-- 实测：`—`
+- 实测：`🟡 2026-10-21 部分` `guard/grant.sh pause` 后 `winput move --yes` exit 4 `GUARD_PAUSED`，resume 后恢复；注入计数未增加
 
 ### S3 · 锁屏拒绝（M3）
 
@@ -161,7 +161,7 @@
 ### S7 · 误操作面收窄
 
 - **判据**：`winput` 的坐标点击必须要求目标是已枚举过的窗口（`--expect-hwnd` 或前置 `wdiag` 校验），防止"点到了用户正在用的别的东西"。
-- 实测：`—`
+- 实测：`✅ 2026-10-21` 坐标点击缺 `--expect-hwnd` → exit 2 `ARG_NEED_EXPECT_HWND`；伪造 hwnd → exit 3 `ENV_NO_WINDOW`；真实点击前用 `WindowFromPoint`+`GetAncestor` 校验根窗口一致，并校验前台窗口
 
 ### S8 · 红线回归
 

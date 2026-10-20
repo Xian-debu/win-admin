@@ -12,7 +12,7 @@
 | **M0** | 文档与骨架 | AGENTS.md、docs/01–09、仓库结构 | E1 | — | ✅ 2026-10-20 |
 | **M0.5** | 部署包工程 | 双包布局、VERSION、bootstrap/rollback/uninstall、发布构建 | E9–E12（见 §M0.5） | 3–4h | ✅ 2026-10-21 |
 | **M1** | 只读：看得见、认得准 | `wshot` `wuia` `wwin(list)` `wdiag` | E1–E7, C1(+C1b), C2, C3 | 4–6h | ✅ 2026-10-21（17/0） |
-| **M2** | 输入：点得中、打得进 | `winput` `wclip` `wwin(focus/layout)` + DPI 校准 | C4–C7, S7 | 6–10h | ☐ |
+| **M2** | 输入：点得中、打得进 | `winput` `wclip` `wwait` `wwin(info)` | C4–C7, S7, S1/S2(部分) | 6–10h | ✅ 2026-10-21（11/0） |
 | **M3** | 守卫：授权、急停、审计 | `guard/`（grant/pause/audit/preflight） | **S1–S8 全绿** | 4–6h | ☐ |
 | **M4** | 组合与技能 | `ops/` + `SKILL.md` + 端到端用例 | C8, E8, E 族回归 | 5–8h | ☐ |
 | **M5** | 稳定化 | 回归、文档定稿、性能打磨 | 全表回归 + 报告 | 2–3h | ☐ |
@@ -94,7 +94,11 @@ M2 未开工前提：仓库内仍无任何注入代码（D14），`check-release
 - 中文乱码若修不掉 → 退回“全部输出英文 key + 名称 base64”，但这是下策。
 - UIA 树遍历慢（>3s）→ 先按 hwnd 取 `ElementFromHandle`，不遍历全桌面。
 
-## M2 · 输入（M1 全绿后）
+## M2 · 输入（✅ 2026-10-21 完成，11/0）
+
+> 实测结论已写回 `docs/04` L3 各行；报告见 `tests/reports/2026-10-21-m2.md`。
+> 未做：DPI 校准脚本（`tests/dpi-calib.sh`）——C6 的 0 px 误差已从侧面证明坐标链正确，留到接第二块屏时补。
+
 
 | # | 工作 | 产出 |
 |---|---|---|

@@ -72,10 +72,11 @@ exit   : 0 成功 / 2 参数错误 / 3 环境不满足（如锁屏） / 4 权限
 |---|---|---|---|---|
 | `wdiag` | 前置体检 | — | `{ok,version,host,user,os,session,desktop,screen,dpiMode,foreground,powershell,guard,wsl}` | ✅ M1 |
 | `wshot` | 截图 | `--rect x,y,w,h` / `--out PATH` | `{ok,path,wsl_path,x,y,w,h,bytes,screen,dpiMode}` | ✅ M1 |
-| `wuia` | 窗口/控件树 | `--list` / `--hwnd H` / `--title REGEX` / `--depth N` / `--max N` / `--filter S` | `{ok,mode,hwnd,depth,maxNodes,count,truncated,nodes:[{depth,name,type,aid,class,rect{x,y,w,h},enabled,offscreen}]}` | ✅ M1 |
-| `wwin` | 窗口操作 | `list`（M2 起加 `focus`/`layout`/`state`） | `{ok,action,count,windows:[{hwnd,hwnd_dec,title,class,pid,process,visible,minimized,rect}],at}` | ✅ M1(list) |
-| `winput` | 输入注入 | `move`/`click`/`dclick`/`drag`/`key`/`type`（M2 起，默认 `--dry-run`） | `{injected:true,...}` | ☐ M2 |
-| `wclip` | 剪贴板 | `get` / `set "文本"` | `{text}` | ☐ M2（中文输入依赖） |
+| `wuia` | 窗口/控件树/取值 | `--list` / `--hwnd H` / `--title REGEX` / `--depth N` / `--max N` / `--filter S` / `--value`（读文本框内容：ValuePattern 优先，退化 TextPattern） | `{ok,mode,hwnd,depth,maxNodes,count,truncated,nodes:[{depth,name,type,aid,class,rect{x,y,w,h},enabled,offscreen}]}` | ✅ M1 |
+| `wwin` | 窗口查询/操作 | `list` / `info --hwnd 0x...`（focus 与 layout 分别合入 `winput --focus` 和 `drag`） | `{ok,action:"info",window:{hwnd,title,class,pid,process,visible,minimized,rect}}`；list 同 M1 | ✅ M1(list) / M2(info) |
+| `winput` | 合成输入 | `move` / `click` / `dclick` / `drag` / `key` / `type`；默认 dry-run，`--yes` 才注入；点击类强制 `--expect-hwnd` | `{ok,action,dryRun,injected,point:{x,y},target:{hwnd,title}}` | ✅ M2 2026-10-21 |
+| `wclip` | 剪贴板 | `get` / `set --text T` / `set --text-file F` / `clear` | `{ok,action,text,len}` | ✅ M2 2026-10-21 |
+| `wwait` | 等待窗口出现 | `--title REGEX` / `--hwnd 0x...`，可选 `--timeout S` `--interval MS` | `{ok,mode:"wait",window{hwnd,hwnd_dec,title},elapsed_ms,polls,interval_ms,at_epoch_ms}`；超时 exit 3 `ENV_WAIT_TIMEOUT` | ✅ M2 2026-10-21 |
 
 **实现细节（M1 实测踩到，写在这里免得后人再踩）：**
 
