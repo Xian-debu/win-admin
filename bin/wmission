@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+# bin/wmission - 长任务的可恢复执行单元（docs/13-mission-protocol.md）
+# 状态机：pending -> running -> done | failed；done 必须带证据。
+set -uo pipefail
+cd "$(dirname "$0")/.." || exit 5
+
+MROOT="$(pwd)/missions"
+CMD="${1:-}"; shift 2>/dev/null || true
+die() { printf '{"ok":false,"code":"%s","message":"%s"}\n' "$1" "$2" >&2; exit "$3"; }
+plan_of() { printf '%s/%s/plan.json' "$MROOT" "$1"; }
+need_mission() { [ -f "$(plan_of "$1")" ] || die MISSION_NOT_FOUND "no such mission: $1" 3; }
+now() { date '+%Y-%m-%dT%H:%M:%S%z'; }
+write_plan() { local p="$1" filter="$2" tmp; tmp="$(mktemp)"; jq "$filter" "$p" > "$tmp" || { rm -f "$tmp"; die PLAN_WRITE "jq failed" 5; }; mv -f "$tmp" "$p"; }
+log_event() { printf '%s\n' "$2" >> "$MROOT/$1/log.jsonl"; }
+
+usage() { sed -n '2,3p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+
+case "$CMD" in
+  init)
+    ID="${1:-}"; [ -n "$ID" ] || usage; shift
+    TITLE=""; while [ $# -gt 0 ]; do case "$1" in --title) TITLE="${2:-}"; shift 2;; *) die ARG "unknown: $1" 2;; esac; done
+    [ -n "$TITLE" ] || die ARG "init needs --title" 2
+    D="$MROOT/$ID"; [ -e "$D" ] && die MISSION_EXISTS "mission exists (refusing to overwrite evidence): $ID" 3
+    mkdir -p "$D/evidence"
+    jq -n --arg id "$ID" --arg t "$TITLE" --arg at "$(now)" '{id:$id,title:$t,created:$at,steps:[]}' > "$D/plan.json"
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --arg t "$TITLE" '{ts:$at,event:"init",title:$t}')"
+    jq -c '{ok:true,id:.id,path:("missions/"+.id)}' "$D/plan.json"
+    ;;
+  add)
+    ID="${1:-}"; need_mission "$ID"; shift
+    T=""; V=""
+    while [ $# -gt 0 ]; do case "$1" in --title) T="${2:-}"; shift 2;; --verify) V="${2:-}"; shift 2;; *) die ARG "unknown: $1" 2;; esac; done
+    [ -n "$T" ] || die ARG "add needs --title" 2
+    N=$(( $(jq '.steps|length' "$(plan_of "$ID")") + 1 ))
+    TMP="$(mktemp)"
+    jq --argjson n "$N" --arg t "$T" --arg v "$V" --arg at "$(now)" \
+      '.steps += [{n:$n,title:$t,status:"pending",verify:$v,attempts:0,evidence:[],notes:[],created:$at}]' \
+      "$(plan_of "$ID")" > "$TMP" && mv -f "$TMP" "$(plan_of "$ID")"
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --argjson n "$N" --arg t "$T" '{ts:$at,event:"add",step:$n,title:$t}')"
+    printf '{"ok":true,"id":"%s","step":%d}\n' "$ID" "$N"
+    ;;
+  start)
+    ID="${1:-}"; N="${2:-}"; need_mission "$ID"; [ -n "$N" ] || usage
+    CUR="$(jq -r --argjson n "$N" '.steps[]|select(.n==$n)|.status' "$(plan_of "$ID")")"
+    [ -n "$CUR" ] || die STEP_NOT_FOUND "no step $N" 3
+    [ "$CUR" = "done" ] && die STEP_DONE "step $N already done" 3
+    TMP="$(mktemp)"
+    jq --argjson n "$N" --arg at "$(now)" '(.steps[]|select(.n==$n)) |= (.status="running" | .started=(.started // $at) | .attempts += 1)' \
+      "$(plan_of "$ID")" > "$TMP" && mv -f "$TMP" "$(plan_of "$ID")"
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --argjson n "$N" '{ts:$at,event:"start",step:$n}')"
+    printf '{"ok":true,"id":"%s","step":%d,"status":"running"}\n' "$ID" "$N"
+    ;;
+  done)
+    ID="${1:-}"; N="${2:-}"; need_mission "$ID"; [ -n "$N" ] || usage; shift 2
+    EV=""; F=""
+    while [ $# -gt 0 ]; do case "$1" in --evidence) EV="${2:-}"; shift 2;; --file) F="${2:-}"; shift 2;; *) die ARG "unknown: $1" 2;; esac; done
+    [ -n "$EV" ] || die ARG "done requires --evidence" 2
+    CUR="$(jq -r --argjson n "$N" '.steps[]|select(.n==$n)|.status' "$(plan_of "$ID")")"
+    [ -n "$CUR" ] || die STEP_NOT_FOUND "no step $N" 3
+    [ "$CUR" = "done" ] && die STEP_DONE "step $N already done" 3
+    EF=""
+    if [ -n "$F" ]; then
+      [ -f "$F" ] || die EVIDENCE_MISSING "no such file: $F" 3
+      EF="missions/$ID/evidence/s$N-$(basename "$F")"
+      cp -f "$F" "$MROOT/$ID/evidence/s$N-$(basename "$F")" || die EVIDENCE_COPY "copy failed" 5
+    fi
+    TMP="$(mktemp)"
+    jq --argjson n "$N" --arg at "$(now)" --arg ev "$EV" --arg ef "$EF" \
+      '.steps |= map(if .n==$n then .status="done" | .finished=$at | .outcome=$ev | .evidence=(.evidence + (if $ef=="" then [] else [$ef] end)) else . end)' \
+      "$(plan_of "$ID")" > "$TMP" && mv -f "$TMP" "$(plan_of "$ID")"
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --argjson n "$N" --arg ev "$EV" --arg ef "$EF" '{ts:$at,event:"done",step:$n,evidence:$ev,file:$ef}')"
+    printf '{"ok":true,"id":"%s","step":%d,"status":"done"}\n' "$ID" "$N"
+    ;;
+  fail)
+    ID="${1:-}"; N="${2:-}"; need_mission "$ID"; [ -n "$N" ] || usage; shift 2
+    R=""; while [ $# -gt 0 ]; do case "$1" in --reason) R="${2:-}"; shift 2;; *) die ARG "unknown: $1" 2;; esac; done
+    [ -n "$R" ] || die ARG "fail requires --reason" 2
+    TMP="$(mktemp)"
+    jq --argjson n "$N" --arg at "$(now)" --arg r "$R" \
+      '.steps |= map(if .n==$n then .status="failed" | .reason=$r | .failed_at=$at else . end)' \
+      "$(plan_of "$ID")" > "$TMP" && mv -f "$TMP" "$(plan_of "$ID")"
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --argjson n "$N" --arg r "$R" '{ts:$at,event:"fail",step:$n,reason:$r}')"
+    printf '{"ok":true,"id":"%s","step":%d,"status":"failed"}\n' "$ID" "$N"
+    ;;
+  note)
+    ID="${1:-}"; need_mission "$ID"; shift
+    T=""; while [ $# -gt 0 ]; do case "$1" in --text) T="${2:-}"; shift 2;; *) die ARG "unknown: $1" 2;; esac; done
+    [ -n "$T" ] || die ARG "note requires --text" 2
+    log_event "$ID" "$(jq -nc --arg at "$(now)" --arg t "$T" '{ts:$at,event:"note",text:$t}')"
+    printf '{"ok":true,"id":"%s","noted":true}\n' "$ID"
+    ;;
+  status)
+    ID="${1:-}"; need_mission "$ID"; shift
+    if [ "${1:-}" = "--json" ]; then cat "$(plan_of "$ID")"; exit 0; fi
+    jq -r '"mission " + .id + "  " + .title, (.steps[] | "  [\(.n)] \(.status|ascii_upcase)  \(.title)\(if (.outcome//"")!="" then "   -> " + .outcome else "" end)")' "$(plan_of "$ID")"
+    ;;
+  resume)
+    ID="${1:-}"; need_mission "$ID"
+    NEXT="$(jq -r '[.steps[]|select(.status!="done")]|sort_by(.n)|.[0] // empty | "\(.n)\t\(.status)\t\(.title)\t\(.attempts)"' "$(plan_of "$ID")")"
+    if [ -z "$NEXT" ]; then jq -c '{ok:true,id:.id,complete:true}' "$(plan_of "$ID")"; exit 0; fi
+    N="$(printf '%s' "$NEXT" | cut -f1)"; S="$(printf '%s' "$NEXT" | cut -f2)"; T="$(printf '%s' "$NEXT" | cut -f3)"; A="$(printf '%s' "$NEXT" | cut -f4)"
+    if [ "$S" = "failed" ] && [ "${A:-0}" -ge 3 ]; then
+      printf '{"ok":false,"id":"%s","step":%s,"code":"ESCALATE","message":"step %s failed %s times - stop and report to the user"}\n' "$ID" "$N" "$N" "$A"; exit 3
+    fi
+    printf '{"ok":true,"id":"%s","next_step":%s,"status":"%s","title":"%s","attempts":%s}\n' "$ID" "$N" "$S" "$T" "$A"
+    ;;
+  list)
+    for d in "$MROOT"/*/; do [ -f "$d/plan.json" ] || continue
+      jq -r '"mission \(.id)  done=\([.steps[]|select(.status=="done")]|length)/\(.steps|length)  \(.title)"' "$d/plan.json"
+    done
+    ;;
+  ""|-h|--help|help) usage ;;
+  *) die ARG "unknown command: $CMD" 2 ;;
+esac
