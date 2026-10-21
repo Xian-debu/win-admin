@@ -1,0 +1,15 @@
+{"ts":"2026-10-21T14:30:11+0800","event":"init","title":"淘宝购物车 → 采购表 Excel"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":1,"title":"确认 Edge 淘宝标签页与会话状态"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":2,"title":"导航到购物车页并确认登录态"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":3,"title":"采集购物车原始数据（页内文本 + 截图）"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":4,"title":"结构化为采购表行并用第二来源交叉校验"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":5,"title":"生成 xlsx 并读回校验（行数/列/合计）"}
+{"ts":"2026-10-21T14:30:11+0800","event":"add","step":6,"title":"写 REPORT.md 并提交"}
+{"ts":"2026-10-21T14:30:14+0800","event":"start","step":1}
+{"ts":"2026-10-21T14:30:20+0800","event":"done","step":1,"evidence":"Edge hwnd 593116 (pid 31408) 前台，4 个标签页，第 4 个是淘宝；窗口 1859x1089@(74,0)，非最大化","file":"missions/taobao-cart-2026-10-21/evidence/s1-s1-edge.png"}
+{"ts":"2026-10-21T14:30:20+0800","event":"start","step":2}
+{"ts":"2026-10-21T14:48:23+0800","event":"done","step":2,"evidence":"购物车页已加载：https://cart.taobao.com/cart.htm，标题「淘宝网 - 我的购物车」，登录态 tb455443353821，全部商品(138)","file":"missions/taobao-cart-2026-10-21/evidence/s2-ev-s2.png"}
+{"ts":"2026-10-21T14:48:23+0800","event":"done","step":3,"evidence":"25 轮 ctrl+a/c 累积渲染文本（raw/p1c/round-25.txt，62 个支付行）+ 12 张 50% 缩放截图（shots/s01-s12.png）","file":"missions/taobao-cart-2026-10-21/evidence/s3-round-25.txt"}
+{"ts":"2026-10-21T14:48:23+0800","event":"done","step":4,"evidence":"parse-cart.py 解析出 63 行，抽查 6/6 单价与截图一致（37.3/37190/8080/3898.3/5.51/30.11）","file":"missions/taobao-cart-2026-10-21/evidence/s4-parsed-v3.json"}
+{"ts":"2026-10-21T14:48:23+0800","event":"done","step":5,"evidence":"openpyxl 读回校验：63 行数据 + 合计行，SUM 复核 202348.60，数量 69，9 行店铺未识别、30 行无原价","file":"missions/taobao-cart-2026-10-21/evidence/s5-淘宝购物车采购表.xlsx"}
+{"ts":"2026-10-21T14:48:23+0800","event":"done","step":6,"evidence":"REPORT.md 已写入仓库，含四个互不相等的数字（138/62/50/63）与已知不足","file":""}

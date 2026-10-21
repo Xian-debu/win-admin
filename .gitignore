@@ -19,3 +19,9 @@ __pycache__/
 # 本地探针临时物
 inventory/raw/tmp/
 dist/
+missions/*/raw/sweep-*.txt
+missions/*/raw/all.txt
+missions/*/raw/p1/
+missions/*/raw/p1b/
+missions/*/raw/p1c/round-*.txt
+!missions/*/raw/p1c/round-25.txt

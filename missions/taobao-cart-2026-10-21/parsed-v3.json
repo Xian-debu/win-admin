@@ -1,0 +1,825 @@
+{
+ "items": [
+  {
+   "shop": "龙戈电子",
+   "title": "线性霍尔传感器模块高灵敏8.3mV/G模拟输出检测磁场强度感应开关",
+   "spec": "",
+   "price": 37.3,
+   "orig_price": 38.0,
+   "qty": 2,
+   "status": "可购买",
+   "prices_raw": [
+    37.3,
+    38.0
+   ]
+  },
+  {
+   "shop": "深算实验室仿真服务器租用",
+   "title": "超聚变DGX Spark GB10迷你工作站Xpark大模型本地部署主机128G/2T",
+   "spec": "超聚变Xpark黑金单机（2T现货，送Ai管理平台）",
+   "price": 37190.0,
+   "orig_price": 37200.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    37190.0,
+    37200.0
+   ]
+  },
+  {
+   "shop": "acer宏碁存储旗舰店",
+   "title": "【8TB】宏碁掠夺者SSD固态硬盘 M.2(NVMe协议) GM9000 PCIe5.0",
+   "spec": "",
+   "price": 8080.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    8080.0
+   ]
+  },
+  {
+   "shop": "Lexar雷克沙旗舰店",
+   "title": "Lexar雷克沙M.2固态硬盘4T8T台式机Pcie4.0笔记本索尼PS5固态SSD",
+   "spec": "4TB 固态(ARES马甲版 读7400MB/S 写6500MB/S)",
+   "price": 3898.3,
+   "orig_price": 6999.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    3898.3,
+    0.7,
+    6999.0
+   ]
+  },
+  {
+   "shop": "touglesy旗舰店",
+   "title": "PCA9548 TCA9548A 1-to-8 I2C 8路IIC 多路扩展板模块 开发板",
+   "spec": "TCA9548模块",
+   "price": 5.51,
+   "orig_price": 7.3,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    5.51,
+    1.79,
+    7.3
+   ]
+  },
+  {
+   "shop": "",
+   "title": "SHT20SHT30/31/35/41温湿度传感器模块I2C通讯数字型宽电压传感器",
+   "spec": "SHT41温湿度传感器模块",
+   "price": 30.11,
+   "orig_price": 36.31,
+   "qty": 2,
+   "status": "可购买",
+   "prices_raw": [
+    30.11,
+    6.2,
+    36.31
+   ]
+  },
+  {
+   "shop": "",
+   "title": "ADXL345/335 6100P数字三轴重力倾斜度角度传感器模块GY291倾角61",
+   "spec": "新款ADXL345 加速度传感器",
+   "price": 16.41,
+   "orig_price": 21.31,
+   "qty": 2,
+   "status": "可购买",
+   "prices_raw": [
+    16.41,
+    4.9,
+    21.31
+   ]
+  },
+  {
+   "shop": "鹿小班旗舰店",
+   "title": "鹿小班INMP441全向麦克风模块MEMS高精度低功耗I2S接口支持ESP32",
+   "spec": "【国产】INMP441麦克风模块【焊好排针】",
+   "price": 8.5,
+   "orig_price": 10.2,
+   "qty": 2,
+   "status": "失效",
+   "prices_raw": [
+    8.5,
+    1.7,
+    10.2
+   ]
+  },
+  {
+   "shop": "牛盟记旗舰店",
+   "title": "牛盟记 内蒙古风干牛肉孕妇湿软单独小包装正宗零食官方旗舰店",
+   "spec": "",
+   "price": 151.0,
+   "orig_price": 188.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    151.0,
+    8.0,
+    188.0
+   ]
+  },
+  {
+   "shop": "纤冠军旗舰店",
+   "title": "纤冠军奇亚籽羽衣甘蓝果蔬汁饮料自律膳食纤维轻食饮品官方旗舰店",
+   "spec": "",
+   "price": 119.0,
+   "orig_price": 149.7,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    119.0,
+    0.7,
+    149.7
+   ]
+  },
+  {
+   "shop": "国货严选旗舰",
+   "title": "轻上纤冠军羽衣甘蓝奇亚籽西芹汁含膳食纤维果蔬汁饮品245ml*10瓶",
+   "spec": "『压风式散热』14CM巨型双涡轮√适用于14~21寸设备",
+   "price": 87.66,
+   "orig_price": 141.7,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    87.66,
+    4.1,
+    141.7
+   ]
+  },
+  {
+   "shop": "光岳楼旗舰店",
+   "title": "光岳楼即食鲜苁蓉茶九蒸九晒5年足龄苁蓉男熬夜状态精力满满补养",
+   "spec": "【精力满满】✅鲜苁蓉300g*2盒",
+   "price": 292.0,
+   "orig_price": 488.0,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    292.0,
+    16.0,
+    488.0
+   ]
+  },
+  {
+   "shop": "龙巢保健品旗舰店",
+   "title": "【龙巢即食地黄】5年陈化九制正宗焦作怀地黄熬夜状态不足不上火",
+   "spec": "",
+   "price": 499.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    499.0
+   ]
+  },
+  {
+   "shop": "天滋成人用品专营店",
+   "title": "液态硅胶便携迷你自慰套男生宿舍隐蔽慢玩小圣杯成人阴茎脱敏训练",
+   "spec": "飞机套*3润滑60ml阻复环",
+   "price": 38.61,
+   "orig_price": 49.01,
+   "qty": 2,
+   "status": "可购买",
+   "prices_raw": [
+    38.61,
+    10.4,
+    49.01
+   ]
+  },
+  {
+   "shop": "伦泽亲旗舰店",
+   "title": "牛板筋内蒙古大块手撕延边东北特产自拌即食香辣牛板筋独立真空",
+   "spec": "【筋道弹牙】延边厚切牛板筋香辣味*30包",
+   "price": 102.91,
+   "orig_price": 108.91,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    102.91,
+    108.91,
+    1948.4
+   ]
+  },
+  {
+   "shop": "山克旗舰店",
+   "title": "山克ups不间断电源220v 1000VA/600W电脑稳压应急备用电源防停电",
+   "spec": "⭐⭐⭐1000VA/600W(人气爆款 店长推荐)",
+   "price": 175.3,
+   "orig_price": 208.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    175.3,
+    0.7,
+    208.0
+   ]
+  },
+  {
+   "shop": "鹿为旗舰店",
+   "title": "鹿为电脑显示器增高架 多功能带抽屉收纳USB扩展坞无线充电 笔记本rgb台式屏幕置物桌面改造显示屏支撑架底座",
+   "spec": "",
+   "price": 302.62,
+   "orig_price": 376.32,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    302.62,
+    16.7,
+    376.32
+   ]
+  },
+  {
+   "shop": "国潮食品专营店",
+   "title": "农科院风干鸡胸肉干条熟食减低解馋脂卡热量耐嚼休闲小吃零食即食",
+   "spec": "",
+   "price": 36.1,
+   "orig_price": 46.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    36.1,
+    0.7,
+    46.0
+   ]
+  },
+  {
+   "shop": "ibip旗舰店",
+   "title": "【10.5英寸触摸屏】iBook Pocket5 迷你便携掌上二合一平板笔记本电脑英特尔办公触摸屏高性能商务口袋出差",
+   "spec": "",
+   "price": 3688.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    3688.0
+   ]
+  },
+  {
+   "shop": "ZWIDE数码旗舰店",
+   "title": "Zwide N8迷你笔记本电脑8英寸触膜屏二合一便捷口袋出差商务办公学习",
+   "spec": "16GB",
+   "price": 2998.3,
+   "orig_price": 3769.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    2998.3,
+    300.7,
+    3769.0
+   ]
+  },
+  {
+   "shop": "gamepaddigital旗舰店",
+   "title": "【官方直营】GPD Pocket3 迷你便携轻小掌上笔记本电脑二合一平板商务电脑8英寸轻薄指纹KVM触屏出差旅行",
+   "spec": "",
+   "price": 5299.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    5299.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "GPD MicroPC2 2026新款7英寸工程师掌机笔记本电脑触摸屏丰富接口运维调试二合一翻转迷你便携式办公炒股UMPC",
+   "spec": "",
+   "price": 4599.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    4599.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "【官方直营】GPD Pocket3 迷你便携轻小掌上笔记本电脑二合一平板商务电脑8英寸轻薄指纹KVM触屏出差旅行",
+   "spec": "",
+   "price": 5299.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    5299.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "【官方直营】GPD Pocket3 迷你便携轻小掌上笔记本电脑二合一平板商务电脑8英寸轻薄指纹KVM触屏出差旅行",
+   "spec": "冷吃牛肉【麻辣+香辣+五香】3大袋【超值装-96%用户选择】",
+   "price": 129.2,
+   "orig_price": 179.9,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    129.2,
+    0.7,
+    179.9
+   ]
+  },
+  {
+   "shop": "华为诚创专卖店",
+   "title": "旗舰款】华为鸿蒙智选5GCPE 5S移动路由器随身无线WiFi6插卡移动上网宝5G4G全网通千兆网口mesh组网户外正品",
+   "spec": "395+128G内存",
+   "price": 4999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    4999.0
+   ]
+  },
+  {
+   "shop": "臻尖茶叶旗舰店",
+   "title": "绿茶2026新茶明前高山云雾春茶特级毛尖茶叶自己喝正品官方旗舰店",
+   "spec": "黑色【赠送跪垫】+体位垫：升级六肘撑/四轮健腹轮-分开两个快递发货",
+   "price": 139.2,
+   "orig_price": 189.9,
+   "qty": 2,
+   "status": "需重选规格",
+   "prices_raw": [
+    139.2,
+    0.7,
+    189.9
+   ]
+  },
+  {
+   "shop": "MINISFORUM旗舰店",
+   "title": "铭凡MINISFORUM X1 Pro-370旗舰AMD锐龙 AI9 HX 370高性能AI PC迷你主机台式机mini主机电脑游戏商务办公",
+   "spec": "X1 Pro-370（锐龙AI 9 HX 370）",
+   "price": 4488.3,
+   "orig_price": 4939.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    4488.3,
+    0.7,
+    4939.0
+   ]
+  },
+  {
+   "shop": "绿联明和盛专卖店",
+   "title": "绿联多口充电器手机充电插头ipad平板2.4a快充一拖四分4口旅行多功能充电头桌面带线充电器适用苹果安卓手机",
+   "spec": "【34W带线款】四口同时充",
+   "price": 73.3,
+   "orig_price": 98.8,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    73.3,
+    5.7,
+    98.8
+   ]
+  },
+  {
+   "shop": "创乐博旗舰店",
+   "title": "Jetson AGX Thor 官方原装开发板套件 AI智能 T5000模组 IGX thor",
+   "spec": "Jetson AGX Thor开发者套件 + 4T固态(现货顺丰包邮)",
+   "price": 46868.3,
+   "orig_price": 66869.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    46868.3,
+    66869.0,
+    100558.3
+   ]
+  },
+  {
+   "shop": "正点原子旗舰店",
+   "title": "正点原子USB测试仪C2充电功率计电流电压表检测器快充协议PD诱骗",
+   "spec": "USB测试仪C2 Pro-脉冲红（赠钢化膜1张）",
+   "price": 193.0,
+   "orig_price": 268.0,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    193.0,
+    16.0,
+    268.0
+   ]
+  },
+  {
+   "shop": "tenga典雅旗舰店",
+   "title": "TENGA自动旋转飞机口软胶杯男用手动全日本自慰器成人用品龙骨",
+   "spec": "【128 4TB】",
+   "price": 140.3,
+   "orig_price": 176.0,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    140.3,
+    13.7,
+    176.0
+   ]
+  },
+  {
+   "shop": "MOREFINE电脑旗舰店",
+   "title": "MOREFINE摩方 12代酷睿i3-N305迷你主机八核双网口低功耗 Win11办公游戏mini小电脑N150准系统M9S 官方旗舰店",
+   "spec": "HH_PM_L1(200nA~4A)",
+   "price": 368.3,
+   "orig_price": 369.0,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    368.3,
+    0.7,
+    369.0
+   ]
+  },
+  {
+   "shop": "摩方电脑旗舰店",
+   "title": "MOREFINE摩方i7-13800H迷你主机全新13代ddr5办公13900HK家用S600编程minipc准系统双网口nvme4.官方旗舰店",
+   "spec": "",
+   "price": 3000.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    3000.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "MOREFINE摩方M9S N305迷你主机双千兆网口低功耗轻办公家用软路由游戏4K微型mini小电脑官方旗舰店",
+   "spec": "",
+   "price": 1459.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    1459.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "MOREFINE/摩方i5-8257U全新12代N100迷你主机M8办公13家用N150游戏4K便携微型mini小电脑准系统M9官方旗舰店",
+   "spec": "；准系统 M.2插槽N100 单DDR5内存",
+   "price": 1128.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    1128.0
+   ]
+  },
+  {
+   "shop": "研凌旗舰店",
+   "title": "研凌N3322 12代嵌入式工控机工业级计算机迷你电脑主机i3-1215U/i5-1235U/ i7-1255U",
+   "spec": "N3050开发版",
+   "price": 2000.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    2000.0
+   ]
+  },
+  {
+   "shop": "希右旗舰店",
+   "title": "桌面小型空气净化器除二手烟家用除甲醛异味办公室迷你负离子机",
+   "spec": "【高配款】负离子净化☆双层复合滤芯☆送香片【4000毫安电池款】",
+   "price": 76.1,
+   "orig_price": 99.0,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    76.1,
+    11.0,
+    99.0
+   ]
+  },
+  {
+   "shop": "ACEMAGIC阿迈奇旗舰店",
+   "title": "阿迈奇F5A HX470迷你主机AMD锐龙AI 9 高刷8K性能游戏办公设计小型电脑OpenClaw部署主机",
+   "spec": "8645HS【ES】6核心 办公游戏",
+   "price": 5999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    5999.0
+   ]
+  },
+  {
+   "shop": "topfeel旗舰店",
+   "title": "极夜/华擎 X600 8700g小主机迷你台式机电脑微型小型全铝虚拟机服务器 9600x/9700x/9800X3D【DeskMate】",
+   "spec": "",
+   "price": 1399.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    1399.0
+   ]
+  },
+  {
+   "shop": "品尚创想电脑专营店",
+   "title": "摩方13代N150四核迷你主机 win11办公N5095家用游戏4K双屏微型mini PC小电脑便携一线通 m6s",
+   "spec": "TN屏电容触摸-耳朵版",
+   "price": 1529.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    1529.0
+   ]
+  },
+  {
+   "shop": "凌壹旗舰店",
+   "title": "凌壹12代N150迷你主机WIN11小主机NUC双网口低功耗N97准系统4K三屏NAS软路由N100微型电脑mini PC",
+   "spec": "【准系统】（无内存无硬盘）",
+   "price": 1698.3,
+   "orig_price": 2869.0,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    1698.3,
+    2869.0,
+    2299.0
+   ]
+  },
+  {
+   "shop": "淘七",
+   "title": "英睿达笔记本内存条DDR5 5600 16G 24G 32G 48G 镁光游戏原厂原装",
+   "spec": "D5 5600 32G*2【原厂套条】",
+   "price": 6400.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    6400.0
+   ]
+  },
+  {
+   "shop": "即将售罄",
+   "title": "英睿达美光DDR5 5600 8G 16G 32G 48G电脑游戏笔记本内存条",
+   "spec": "48G DDR5 5600笔记本 原装正品",
+   "price": 4099.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "失效",
+   "prices_raw": [
+    4099.0
+   ]
+  },
+  {
+   "shop": "汉印爱惠佳专卖店",
+   "title": "汉印MT610/688家用小型打印机手机蓝牙连接无线迷你便携学生作业A4黑白无墨热敏试卷错题整理拍照扫描学习机",
+   "spec": "雷电5 直对立体弯",
+   "price": 338.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    338.0
+   ]
+  },
+  {
+   "shop": "广翔达数码专营店",
+   "title": "DP公对公2.1版本双边L型弯头高清视频信号连接线DisplayPort高刷16K@30Hz 8K@240Hz显卡电脑主机显示器双弯头",
+   "spec": "直头对右弯【2.1版】DP高清视频线",
+   "price": 79.0,
+   "orig_price": 93.8,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    79.0,
+    5.4,
+    93.8
+   ]
+  },
+  {
+   "shop": "乐光深途专卖店",
+   "title": "乐光户外15/20/35公里无线网桥工业级一对大功率超远距离主干网络传输CPE抛物面天线5.8g千兆wifi室外点对点",
+   "spec": "15公里（单只）",
+   "price": 544.0,
+   "orig_price": 699.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    544.0,
+    61.0,
+    699.0
+   ]
+  },
+  {
+   "shop": "无线猫灵旗舰店",
+   "title": "移动4G无线路由器随身wifi免插卡多网通便携式笔记本台式电脑宽带企工业级办公全国通用高速流量商铺光纤网络",
+   "spec": "官方标配",
+   "price": 359.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    359.0
+   ]
+  },
+  {
+   "shop": "雷鸟智能眼镜旗舰店",
+   "title": "【双11全年巅峰价】雷鸟RayNeo Air 4 Pro智能AR眼镜头戴电视HDR10眼镜高清观影XR设备非vr ai眼镜",
+   "spec": "J4105(8+128G)Win10",
+   "price": 948.3,
+   "orig_price": 969.0,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    948.3,
+    969.0,
+    556.0
+   ]
+  },
+  {
+   "shop": "北京重新定位科技有限公司",
+   "title": "摄影玩家数码伴侣无线wifi移动硬盘盒手机电脑照片存储器一键备份",
+   "spec": "",
+   "price": 398.3,
+   "orig_price": 399.0,
+   "qty": 1,
+   "status": "即将售罄",
+   "prices_raw": [
+    398.3,
+    399.0
+   ]
+  },
+  {
+   "shop": "即将售罄",
+   "title": "瑞芯微RK3588AI边缘计算盒子工业级AI算力盒子RK3576安卓迷你主机",
+   "spec": "官方标配",
+   "price": 2094.3,
+   "orig_price": 2165.0,
+   "qty": 1,
+   "status": "可购买",
+   "prices_raw": [
+    2094.3,
+    2165.0
+   ]
+  },
+  {
+   "shop": "西数官方旗舰店",
+   "title": "WD西部数据机械硬盘1t西数2t黑盘1tb游戏台式机电脑4t 6t 8t正品",
+   "spec": "",
+   "price": 3399.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    3399.0
+   ]
+  },
+  {
+   "shop": "",
+   "title": "WD西部数据机械硬盘1t西数2t黑盘1tb游戏台式机电脑4t 6t 8t正品",
+   "spec": "",
+   "price": 3399.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    3399.0
+   ]
+  },
+  {
+   "shop": "奥睿科上海专卖店",
+   "title": "ORICO/奥睿科type-c扩展坞M.2NVMe/SATA双协议硬盘盒USB3.2便携式拓展坞雷电3/4笔记本电脑macbookpro转换器",
+   "spec": "",
+   "price": 516.47,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    516.47
+   ]
+  },
+  {
+   "shop": "",
+   "title": "ORICO/奥睿科type-c扩展坞M.2NVMe/SATA双协议硬盘盒USB3.2便携式拓展坞雷电3/4笔记本电脑macbookpro转换器",
+   "spec": "",
+   "price": 516.47,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    516.47
+   ]
+  },
+  {
+   "shop": "绿联数码旗舰店",
+   "title": "绿联m.2固态硬盘盒子nvme/sata双协议m2移动硬盘笔记本ssd外接盒",
+   "spec": "",
+   "price": 99.9,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    99.9
+   ]
+  },
+  {
+   "shop": "大人糖官方旗舰店",
+   "title": "大人糖小海豹跳蛋自慰器情趣性用品女性专用成人玩具高潮震动海豚",
+   "spec": "AP",
+   "price": 343.0,
+   "orig_price": 439.0,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    343.0,
+    16.0,
+    439.0
+   ]
+  },
+  {
+   "shop": "nve旗舰店",
+   "title": "笔记本清灰气吹电脑吹尘球风扇键盘清洁除尘强力皮吹洗耳球皮老虎",
+   "spec": "【长嘴气吹】★单个装★无伤清灰",
+   "price": 8.8,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    8.8
+   ]
+  },
+  {
+   "shop": "小米官方旗舰店",
+   "title": "小米官旗米家空气净化器4lite家用除甲醛抗菌吸烟宠物小型净化机",
+   "spec": "",
+   "price": 899.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    899.0
+   ]
+  },
+  {
+   "shop": "绿巨能旗舰店",
+   "title": "绿巨能V12/V12Ultra压风式散热器笔记本电脑智控风压式散热底座降温风扇游戏本支架防尘涡轮压风静音降噪V16",
+   "spec": "S800-8TB【2G独立缓存+7300M/s 】",
+   "price": 999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    999.0
+   ]
+  },
+  {
+   "shop": "gskill芝奇旗舰店",
+   "title": "芝奇DDR5皇家戟系列灯条6400 7200 7600台式机内存条16g/24g套装",
+   "spec": "",
+   "price": 6999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    6999.0
+   ]
+  },
+  {
+   "shop": "WD西部数据康正信达专卖店",
+   "title": "WD西部数据SN3000/SN5100固态硬盘1T 2T 500G笔记本SSD台式电脑m2",
+   "spec": "",
+   "price": 2000.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    2000.0
+   ]
+  },
+  {
+   "shop": "AMD旗舰店",
+   "title": "AMD锐龙9 9950X3D处理器16核32线程144MB缓存频率至高5.7GhzCPU",
+   "spec": "",
+   "price": 8999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    8999.0
+   ]
+  },
+  {
+   "shop": "ASUS华硕旗舰店",
+   "title": "Asus/华硕TUF GAMING X870-PLUS WIFI台式电脑电竞游戏主板旗舰店",
+   "spec": "",
+   "price": 9999.0,
+   "orig_price": null,
+   "qty": 1,
+   "status": "需重选规格",
+   "prices_raw": [
+    9999.0
+   ]
+  }
+ ],
+ "count": 63,
+ "qty_sum": 69,
+ "amount_sum": 202348.6
+}
