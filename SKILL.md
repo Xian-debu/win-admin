@@ -97,3 +97,40 @@ ops/wait-for  --title "Chrome" --timeout 10
 - 用户不在、无人确认的批量点击：不做；用户只授权了 scope 之外的动作：不做。
 - 需要 UAC 提权：只提示用户手动点，绝不自动点。
 - 目标控件需要「理解业务」才能判断对错（如转账、删除、提交订单）：先 dry-run 把 point 与控件名给用户确认。
+
+## 7. 长任务：用 mission，不要用"记忆里的计划"
+
+任何超过 3 步、可能中途断掉的任务，先用 `bin/wmission` 建可恢复执行单元（`docs/13`）：
+
+```bash
+bin/wmission init <id> --title "任务名"
+bin/wmission add  <id> --title "步骤 1" --verify "怎么判它成了"
+bin/wmission start <id> 1
+bin/wmission done  <id> 1 --evidence "实测证据（数字/命令输出）" --file 产物路径
+bin/wmission status <id> [--json]      # 断线后第一件事
+bin/wmission resume <id>               # 连续失败 3 次返回 ESCALATE rc=3，停下报告用户
+```
+
+规则：**done 必须带证据**；没有证据的"完成了"等于没做；每步证据落 `missions/<id>/evidence/`。
+mission **不是**新的授权通道——守卫层照旧（grant/pause/audit）。
+
+## 8. 网页数据采集（JS 渲染的页面）
+
+1. **导航走 URL**：`winput key ctrl+l` → `winput type --text "https://…"` → `enter`。坐标点导航链接经常点偏（实测点「购物车」掉进收藏夹）。
+2. **不要指望三条路**：`ctrl+u` 源码只有空壳；F12 控制台收不到 SendInput 打的字；CDP 端口默认不监听。
+3. **懒加载靠多轮累积**：`ctrl+a` → `ctrl+c` → `wclip get` → `escape` → `pagedown`，重复 20–30 轮；单轮只能拿到视口内的几条。
+4. **剪贴板是 CRLF**：`tr -d '\r'` 之后再 grep，否则 `^锚点$` 永远不匹配。
+5. **页面文本里的"失效/缺货"字样每行都有**（CSS 隐藏），**不能**用来判状态；状态只能看截图。
+6. **缩放会改 DOM 结构**：25% 时操作列整列消失；采集期间固定缩放（`ctrl+0` 复位）。
+7. **视觉做第二来源**：50% 缩放下逐屏截图，比对价格/数量；两源不一致时以截图为准并记差异。
+8. **注入的是前台窗口**：`winput` 的 `--expect-hwnd` 只断言不重定向，发键前先 `bin/wwin focus`。
+
+完整实例（真实任务，含四个数字对不上的处理方式）：`missions/taobao-cart-2026-10-21/REPORT.md`。
+
+## 9. 已知局限（v1.0.0）
+
+- 单次原语经 `winps` 桥约 600–750 ms，别一步一调，能合并的用 `ops/`。
+- 前台锁：Windows 可能拒绝后台进程抢焦点，发键前必须确认前台窗口。
+- Edge 的 UIA 树只有 53 个节点，页面内容读不到 → 只能走文本/截图。
+- 审计账本同用户可改（K22），真隔离未做。
+

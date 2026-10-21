@@ -32,6 +32,7 @@
 | 11 | [已知问题](docs/11-known-issues.md) | K1–K33：每条都有实测证据与修复状态 | 活文档 |
 | 12 | [复盘](docs/12-retro.md) | 一夜九个翻车点（按代价排序）、三个关键判断、明确没做的事 | 冻结 |
 | 13 | [Mission 协议](docs/13-mission-protocol.md) | 长任务的可恢复执行单元：plan/log/evidence 三层 + `wmission` CLI | 现行 |
+| 15 | [技能沉淀](docs/15-skills-distillation.md) | 这次实战新增/追加/合并了哪些技能、为什么没升级成插件 | 新增 |
 | 14 | [依赖清点](docs/14-dependencies.md) | 跑起来要什么、可选什么、我们没用什么（版本均实测） | 现行 |
 | — | [真实演练实录](missions/taobao-cart-2026-10-21/REPORT.md) | 淘宝购物车 → 采购表：63 行 / ¥202,348.60 / 四个数字对不上 | 存档 |
 
