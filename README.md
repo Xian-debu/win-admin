@@ -31,6 +31,7 @@
 | 10 | [部署包](docs/10-deployment.md) | 两个包装到哪、怎么升级回滚卸载、怎么打发布物 | 现行 |
 | 11 | [已知问题](docs/11-known-issues.md) | K1–K33：每条都有实测证据与修复状态 | 活文档 |
 | 12 | [复盘](docs/12-retro.md) | 一夜九个翻车点（按代价排序）、三个关键判断、明确没做的事 | 冻结 |
+| 13 | [Mission 协议](docs/13-mission-protocol.md) | 长任务的可恢复执行单元：plan/log/evidence 三层 + `wmission` CLI | 新增 |
 
 ## 目录结构
 

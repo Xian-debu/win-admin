@@ -160,6 +160,21 @@ exit   : 0 成功 / 2 参数错误 / 3 环境不满足（如锁屏） / 4 权限
 | `wait-for <条件> <超时>` | 轮询 UIA/像素，条件成立即返回 |
 | `screenshot-to-me` | 截图 + 返回路径，供 agent 用视觉通道看（若 Q1 支持） |
 
+## 6.5 L3.5 · Mission 层（长任务，2026-10-21 新增）
+
+单条原语是「一次动作」，`ops/` 是「一次组合」，而真实任务（例如去购物车抓数据做 Excel）
+是「跨几十次调用、可能卡住、可能改道」的东西。Mission 层把它切成可恢复的步骤：
+
+```
+missions/<id>/plan.json    步骤清单（唯一真相：标题/状态/次数/证据）
+missions/<id>/log.jsonl    只追加事件：init/add/start/done/fail/note
+missions/<id>/evidence/    每步物证（截图、JSON、xlsx、读回结果）
+```
+
+`bin/wmission` 提供 init/add/start/done/fail/note/status/resume/list；`done` 强制带证据，
+同一 step 连续 3 次 failed 时 `resume` 返回 `ESCALATE`（rc=3）而不是继续重试。
+Mission 不是新的授权通道：注入仍过 `guard/`，动作仍写 audit。
+
 ## 7. L4 · DSH 技能（SKILL.md）
 
 技能只解决三件事，不重复架构细节：
