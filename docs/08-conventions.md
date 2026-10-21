@@ -34,6 +34,7 @@
 | `chore:` | 杂务（gitignore、目录调整） |
 | `release:` | 版本冻结、构建产物与标签 |
 | `auth:` | 自授权清单（`authorization/self-grants.md`） |
+| `missions:` | 任务实录（`missions/<id>/`：plan / 解析脚本 / 产物 / REPORT） |
 
 **body 必须写"为什么 + 实测数字"**。示例（真实提交）：
 

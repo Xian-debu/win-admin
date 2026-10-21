@@ -12,7 +12,7 @@ say()  { printf '\n-- %s\n' "$*"; }
 
 # ---------- E1 commit discipline ----------
 say "E1 commit discipline"
-bad="$(git -C "$REPO_DIR" log --format=%s | grep -v -E '^(init|docs|probe|bin|ops|guard|test|fix|chore|release|auth): ' | head -3)"
+bad="$(git -C "$REPO_DIR" log --format=%s | grep -v -E '^(init|docs|probe|bin|ops|guard|test|fix|chore|release|auth|missions): ' | head -3)"
 [ -z "$bad" ] && ok E1 "all commit subjects carry a known prefix" || no E1 "bad subjects: $bad"
 
 # ---------- E2 doc/bin sync ----------

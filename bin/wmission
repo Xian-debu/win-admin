@@ -13,7 +13,7 @@ now() { date '+%Y-%m-%dT%H:%M:%S%z'; }
 write_plan() { local p="$1" filter="$2" tmp; tmp="$(mktemp)"; jq "$filter" "$p" > "$tmp" || { rm -f "$tmp"; die PLAN_WRITE "jq failed" 5; }; mv -f "$tmp" "$p"; }
 log_event() { printf '%s\n' "$2" >> "$MROOT/$1/log.jsonl"; }
 
-usage() { sed -n '2,3p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
+usage() { sed -n '2,3p' "$0" | sed 's/^# \{0,1\}//'; exit "${1:-2}"; }
 
 case "$CMD" in
   init)
@@ -109,6 +109,7 @@ case "$CMD" in
       jq -r '"mission \(.id)  done=\([.steps[]|select(.status=="done")]|length)/\(.steps|length)  \(.title)"' "$d/plan.json"
     done
     ;;
-  ""|-h|--help|help) usage ;;
+  "" ) usage ;;
+  -h|--help|help) usage 0 ;;
   *) die ARG "unknown command: $CMD" 2 ;;
 esac
