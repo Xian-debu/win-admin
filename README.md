@@ -31,7 +31,9 @@
 | 10 | [部署包](docs/10-deployment.md) | 两个包装到哪、怎么升级回滚卸载、怎么打发布物 | 现行 |
 | 11 | [已知问题](docs/11-known-issues.md) | K1–K33：每条都有实测证据与修复状态 | 活文档 |
 | 12 | [复盘](docs/12-retro.md) | 一夜九个翻车点（按代价排序）、三个关键判断、明确没做的事 | 冻结 |
-| 13 | [Mission 协议](docs/13-mission-protocol.md) | 长任务的可恢复执行单元：plan/log/evidence 三层 + `wmission` CLI | 新增 |
+| 13 | [Mission 协议](docs/13-mission-protocol.md) | 长任务的可恢复执行单元：plan/log/evidence 三层 + `wmission` CLI | 现行 |
+| 14 | [依赖清点](docs/14-dependencies.md) | 跑起来要什么、可选什么、我们没用什么（版本均实测） | 现行 |
+| — | [真实演练实录](missions/taobao-cart-2026-10-21/REPORT.md) | 淘宝购物车 → 采购表：63 行 / ¥202,348.60 / 四个数字对不上 | 存档 |
 
 ## 目录结构
 
@@ -155,3 +157,66 @@ bash scripts/uninstall.sh --yes
 - **锁屏检测**：Win11 版本差异可能让拒绝码文案漂移（K21）；真锁屏无法自测，用只能更严格的钩子断言。
 - **审计不可篡改**：同用户进程可删改账本（K22）；真隔离需独立账户/系统服务，本轮明确不做。
 - ~~视觉通道未定（Q1）~~：**已预验通过**（2026-10-20），模型可读截图文字；但像素级精度仍归 UIA。
+
+---
+
+## 真实演练：淘宝购物车 → 采购表 Excel（2026-10-21）
+
+这不是玩具 demo，是用户当天给的真任务（`docs/13` Mission 协议的第一个实例，实录见
+[`missions/taobao-cart-2026-10-21/REPORT.md`](missions/taobao-cart-2026-10-21/REPORT.md)）：
+
+| 环节 | 怎么做的 | 结果 |
+|---|---|---|
+| 定位 | `wwin focus` 激活 Edge → `winput key ctrl+l` 输入 `cart.taobao.com/cart.htm` | 购物车页，登录态在 |
+| 采集 | 25 轮 `Ctrl+A/Ctrl+C` → `wclip get` 累积渲染文本 + 12 张 50% 缩放截图 | 62 个支付行 + 完整条目文本 |
+| 解析 | `parse-cart.py`（价格组锚定「平台加补后」、判别「距加入降」、数量取末组之后） | 63 行，抽查 6/6 单价与截图一致 |
+| 产出 | `build-xlsx.py`（openpyxl）→ 2 个工作表 | `out/淘宝购物车采购表.xlsx`，SUM 复核 ¥202,348.60 |
+| 对账 | 角标 138 / 文本 62 行 / 全选可结算 50 件 / 本表 63 行 | 四个数字不相等，差异**原样登记**，不做推测性修正 |
+
+关键点：**全程没有接口抓包、没有 DevTools 协议、没有注入页面脚本**，只用键盘/剪贴板/截图这类"人也能做"的动作。
+试过并失败的路（记录在 REPORT）：`ctrl+u` 源码壳、F12 控制台收键、CDP 端口、`javascript:` 地址栏。
+
+## 依赖与"用了什么"（完整清单见 [docs/14](docs/14-dependencies.md)）
+
+- **硬依赖**：WSL2 + bash 5.2 + jq 1.7 + Windows 自带 PowerShell 5.1 + .NET（UIAutomationClient/Drawing/Forms，全部 `Add-Type` 内联）。
+- **零三方库**：没有 pip 包、没有 npm 包、没有驱动、没有浏览器扩展、没有常驻服务。
+- **开发期可选**：Python 3.12.3 + openpyxl 3.1.5（只用于离线解析与出 xlsx）。
+- **模型**：DeepSeek-V4.1-Flash（规划 + 执行 + 视觉判读），未调用任何云视觉/OCR API，截图不出本机。
+- **技能**：本仓库的 `SKILL.md`（安装到 `~/.dsh/skills/win-admin`）+ `wsl-windows-token-bridge`、`local-facts-bridge`、`windows-gui-e2e-testing`。
+
+## 控制方式（用户手里有三个开关）
+
+| 想做什么 | 怎么做 | 生效时间 |
+|---|---|---|
+| 临时允许我操作 | 让我 `guard/grant.sh issue --minutes 30 --scope input --note "你的原话"`（我会把原话写进令牌） | 立即 |
+| 立刻收回 | `rm ~/.dsh/win-admin/grant.json` | 下一次动作即 `GUARD_NO_GRANT` |
+| 紧急刹车 | `touch ~/.dsh/win-admin/pause.flag` | 下一次动作即 `GUARD_PAUSED`（软通道，用户 D7 确认） |
+| 事后追责 | `jq . ~/.dsh/win-admin/audit/$(date +%F).jsonl` | 一行一动作，被拒的也记 |
+
+我会**拒绝**的情况（不是"尽量"）：锁屏/断开/息屏（`SESSION_LOCKED`）、UAC 安全桌面（`UAC_SECURE_DESKTOP`）、
+无有效令牌、令牌被改（`GUARD_TAMPERED`）、坐标点击未声明目标窗口（S7）。
+
+## 换台机器怎么部署（难度分级）
+
+| 环境 | 难度 | 要做的事 | 已知限制 |
+|---|---|---|---|
+| Windows 11 + WSL2（本机） | ★☆☆ 照抄 | 装 `winps` 桥 → `bash scripts/bootstrap.sh` → `bash tests/check-m1.sh`；屏幕缩放非 100% 时会自动声明 DPI | 无（本机全绿） |
+| Windows 10 1809+ + WSL2 | ★★☆ | 同上；DPI 感知走 `SetProcessDPIAware()` 回退分支 | 未实测；UIA 树差异可能影响 `--name` 匹配 |
+| Windows + Git Bash / MSYS2（无 WSL） | ★★★ | 需要自己实现 `winps` 等价桥（bash→powershell）；原语可原样用 | `wsl_path` 输出要改；中文编码坑同 K1 |
+| Linux / macOS 主机 | ★★★★ | 必须另配一台 Windows（RDP/VNC/VM）并重做传输层；本仓库的 `winps` 假设不成立 | 本仓库不承诺可移植 |
+| 多显示器 / 4K 缩放混搭 | ★★★ | 需要把 `--rect` 的坐标系扩到 per-monitor 原点 | Q3 仍未闭环（`docs/02`） |
+
+## 未来改进（按性价比排序）
+
+1. **控件树直读页面**：本次用页面渲染文本 + 截图双源；下一版试 `wuia` 读 Chromium AX 树（需先打开 Edge 无障碍），可省掉 25 轮复制。
+2. **视觉列抽取**：把截图里的价格/数量也逐行对齐，做自动三方比对（文本 / 截图 / 结算栏）。
+3. **审计防篡改**：当前同用户可改账本（K22）→ 独立账户或系统级追加日志。
+4. **多显示器与混合 DPI**：Q3 未闭环，坐标系需要 per-monitor。
+5. **急停升级**：软通道够用（D7），但可加"看门狗进程"（G4，需用户点头）。
+6. **发布**：GitHub Release + 签名 tag 尚未做（M6，需用户决定）。
+
+## 许可
+
+MIT（`LICENSE`）；三方组件见 `THIRD_PARTY_NOTICES.md`。
+本仓库**不含**用户数据：截图与逐轮原始文本默认被 `.gitignore` 排除。
+
