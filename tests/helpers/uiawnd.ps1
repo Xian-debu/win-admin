@@ -43,6 +43,17 @@ $script:n = 0
 $btn.Add_Click({ $script:n = $script:n + 1; Log "click $($script:n)" })
 $root.Children.Add($btn) | Out-Null
 
+$cyc = New-Object System.Windows.Controls.Button
+$cyc.Content = 'CYCLE-0'
+$cyc.Height = 32
+$cyc.Margin = New-Object System.Windows.Thickness(0, 2, 0, 2)
+[System.Windows.Automation.AutomationProperties]::SetAutomationId($cyc, 'wa-cycle')
+$script:cyclen = 0
+# The Name of this control is its Content, so a click changes what get-text reads: the fixture
+# can prove "click -> observable state change" without a second target.
+$cyc.Add_Click({ $script:cyclen = $script:cyclen + 1; $cyc.Content = 'CYCLE-' + $script:cyclen; Log ('cycle ' + $script:cyclen) })
+$root.Children.Add($cyc) | Out-Null
+
 $dis = New-Object System.Windows.Controls.Button
 $dis.Content = 'BTN-DISABLED'
 $dis.Height = 32

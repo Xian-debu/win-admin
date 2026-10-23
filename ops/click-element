@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# ops/click-element - act on a control by semantics, then verify the result.
+# Two strategies, picked automatically (override with --click/--invoke):
+#   invoke: the element advertises UIA Invoke -> call the provider, no cursor, works occluded
+#   click : otherwise focus the window and click the element's rect center through winput
+# Verification is mandatory in spirit and optional in syntax: default proves the element still
+# resolves after the action; --verify value:RE / gone:RE proves a state change instead.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-click-element "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/click-element (--hwnd H | --title REGEX) [--name RE] [--type RE] [--aid RE] [--class RE]
+                        [--index N] [--double] [--strategy invoke|click] [--verify SPEC]
+                        [--timeout MS] [--interval MS] [--yes]
+  --name/--type/--aid/--class   find criteria (at least one)
+  --strategy   invoke (UIA, no cursor) or click (rect center); default: auto
+  --verify     value:RE  the element's value/text must match RE after the action
+               gone:RE   no element matching RE may exist after the action (dialog closed)
+               alive     default: the same find criteria still resolve to a node
+  --timeout    verification deadline in ms (default 3000)
+  default      dry-run: print the candidates, the chosen node and the strategy
+  exit 0 ok | 2 arg | 3 env (no node / verify timeout) | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; NAME=""; TYPE=""; AID=""; CLASS=""; IDX=0
+DOUBLE=0; STRATEGY=auto; VERIFY=alive; TIMEOUT=3000; INTERVAL=150; REAL=0; DEPTH=10; MAX=3000
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
+    --aid) AID="$2"; shift 2 ;;
+    --class) CLASS="$2"; shift 2 ;;
+    --index) IDX="$2"; shift 2 ;;
+    --double) DOUBLE=1; shift ;;
+    --strategy) STRATEGY="$2"; shift 2 ;;
+    --verify) VERIFY="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --interval) INTERVAL="$2"; shift 2 ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --max) MAX="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+case "$STRATEGY" in invoke|click|auto) ;; *) echo '--strategy must be invoke|click|auto' >&2; exit 2 ;; esac
+case "$VERIFY" in alive|value:*|gone:*) ;; *) echo '--verify must be alive, value:RE or gone:RE' >&2; exit 2 ;; esac
+case "$TIMEOUT$INTERVAL$IDX" in *[!0-9]*) echo '--timeout/--interval/--index must be numbers' >&2; exit 2 ;; esac
+[ -n "$NAME$TYPE$AID$CLASS" ] || { echo 'need at least one of --name/--type/--aid/--class' >&2; exit 2; }
+
+# find_criteria -> argv for bin/wuia find (no index: we index with jq here)
+find_args() {
+  FIND_ARGS=(--hwnd "$H" --depth "$DEPTH" --max "$MAX" --limit 200)
+  [ -n "$NAME" ] && FIND_ARGS+=(--find-name "$NAME")
+  [ -n "$TYPE" ] && FIND_ARGS+=(--find-type "$TYPE")
+  [ -n "$AID" ] && FIND_ARGS+=(--find-aid "$AID")
+  [ -n "$CLASS" ] && FIND_ARGS+=(--find-class "$CLASS")
+  FIND_ARGS+=(--on-screen)
+  return 0
+}
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
+H="$((H))"
+find_args
+FJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}")" || op_die EXEC_UIA "wuia find failed for hwnd $H"
+NODE="$(printf '%s' "$FJ" | jq -c --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0 and .enabled == true)][$i] // empty')"
+[ -n "$NODE" ] || op_die ENV_NO_NODE "no control matched (hwnd=$H name=$NAME type=$TYPE aid=$AID class=$CLASS index=$IDX)"
+
+HASINV="$(printf '%s' "$NODE" | jq -r 'if (.patterns | index("Invoke")) then 1 else 0 end')"
+if [ "$STRATEGY" = auto ]; then
+  if [ "$DOUBLE" -eq 1 ]; then STRATEGY=click; elif [ "$HASINV" = 1 ]; then STRATEGY=invoke; else STRATEGY=click; fi
+fi
+CX="$(printf '%s' "$NODE" | jq -r '((.rect.x + .rect.w/2) | floor)') "
+CY="$(printf '%s' "$NODE" | jq -r '((.rect.y + .rect.h/2) | floor)') "
+CX="${CX// /}"; CY="${CY// /}"
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT=dryrun
+  jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" \
+    --argjson x "$CX" --argjson y "$CY" --argjson c "$(printf '%s' "$FJ" | jq '.count')" \
+    '{ok:true,dry_run:true,tool:"ops/click-element",hwnd:$h,candidates:$c,node:$n,strategy:$s,point:{x:$x,y:$y},verify:$v}'
+  exit 0
+fi
+
+op_pause_gate input
+ACTION=""
+if [ "$STRATEGY" = invoke ]; then
+  IARGS=("${FIND_ARGS[@]}" --on-screen --index "$IDX" --invoke)
+  AJ="$(bash "$REPO_DIR/bin/wuia" "${IARGS[@]}")"; ARC=$?
+  ACTION="invoke"
+else
+  op_focus "$H" >/dev/null || { WA_AUDIT_RESULT=ENV_NOT_FOREGROUND; op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground"; }
+  CARGS=(click "$CX" "$CY" --expect-hwnd "$H" --yes)
+  [ "$DOUBLE" -eq 1 ] && CARGS+=(--count 2)
+  AJ="$(bash "$REPO_DIR/bin/winput" "${CARGS[@]}")"; ARC=$?
+  ACTION="click"
+fi
+if [ "$ARC" -ne 0 ]; then
+  CODE="$(printf '%s' "$AJ" | jq -r '.code // "EXEC_ACTION_FAILED"') "
+  CODE="${CODE// /}"
+  WA_AUDIT_RESULT="$CODE"
+  printf '%s\n' "$AJ"
+  exit "$ARC"
+fi
+
+# ---- verification: poll until the predicate holds or the deadline passes ----
+deadline=$(( $(date +%s%3N) + TIMEOUT ))
+state=timeout
+detail='{}'
+while :; do
+  case "$VERIFY" in
+    alive)
+      if bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}" 2>/dev/null \
+           | jq -e --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0)][$i] != null' >/dev/null 2>&1; then
+        state=ok
+      fi ;;
+    value:*)
+      want="${VERIFY#value:}"
+      GJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}" --index "$IDX" --get-value 2>/dev/null || true)"
+      if ! printf '%s' "$GJ" | jq -e '.ok == true' >/dev/null 2>&1; then
+        # no ValuePattern: fall back to get-text, which itself falls back to the element Name.
+        # This is what lets "click -> label changed to X" be verified on a plain button.
+        GJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}" --index "$IDX" --get-text 2>/dev/null || true)"
+      fi
+      if printf '%s' "$GJ" | jq -e --arg re "$want" '.ok == true and ((.value // "") | test($re))' >/dev/null 2>&1; then
+        state=ok
+        detail="$(printf '%s' "$GJ" | jq -c '{value,via}')"
+      fi ;;
+    gone:*)
+      gone="${VERIFY#gone:}"
+      GJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$gone" --on-screen --limit 5 2>/dev/null || true)"
+      if printf '%s' "$GJ" | jq -e '.ok == true and .total == 0' >/dev/null 2>&1; then
+        state=ok
+        detail='{"total":0}'
+      fi ;;
+  esac
+  [ "$state" = ok ] && break
+  [ "$(date +%s%3N)" -ge "$deadline" ] && break
+  sleep "$(awk -v ms="$INTERVAL" 'BEGIN{printf "%.3f", ms/1000}')"
+done
+
+if [ "$state" != ok ]; then
+  WA_AUDIT_RESULT=ENV_TIMEOUT
+  jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" \
+    --argjson t "$TIMEOUT" --arg a "$ACTION" \
+    '{ok:false,code:"ENV_TIMEOUT",msg:("verification " + $v + " did not hold within " + ($t|tostring) + " ms"),hwnd:$h,node:$n,strategy:$s,action:$a}'
+  exit 3
+fi
+
+WA_AUDIT_RESULT=ok
+jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" --arg a "$ACTION" \
+  --argjson aj "$AJ" --argjson d "$detail" --argjson x "$CX" --argjson y "$CY" \
+  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj}'
+exit 0

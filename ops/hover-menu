@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+# ops/hover-menu - reach an item that only exists while its parent is hovered.
+# hover at a point -> wait for the named item to appear -> act on it (UIA Invoke when offered,
+# coordinate click otherwise) -> optionally verify. This is the c0 'hover-only submenu' path.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-hover-menu "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/hover-menu (--hwnd H | --title REGEX) --at X,Y --pick RE
+                     [--dwell MS] [--timeout MS] [--interval MS] [--verify none|alive|gone|value:RE]
+                     [--yes]
+  --at      screen point to hover (the parent item)
+  --pick    UIA name regex of the item that appears while hovering
+  --dwell   hover dwell before looking for --pick (default 600 ms)
+  --verify  none (default, report only), alive, gone, or value:RE
+  exit 0 ok | 2 arg | 3 env (item never appeared / verify failed) | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; AT=""; PICK=""; DWELL=600; TIMEOUT=3000; INTERVAL=120; VERIFY=none; REAL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --at) AT="$2"; shift 2 ;;
+    --pick) PICK="$2"; shift 2 ;;
+    --dwell) DWELL="$2"; shift 2 ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --interval) INTERVAL="$2"; shift 2 ;;
+    --verify) VERIFY="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$AT" in *,*) ;; *) echo '--at needs X,Y' >&2; exit 2 ;; esac
+AX="${AT%%,*}"; AY="${AT#*,}"
+case "$AX$AY$DWELL$TIMEOUT$INTERVAL" in *[!0-9-]*) echo '--at/--dwell/--timeout/--interval must be numeric' >&2; exit 2 ;; esac
+[ -n "$PICK" ] || { echo 'need --pick' >&2; exit 2; }
+case "$VERIFY" in none|alive|gone|value:*) ;; *) echo '--verify must be none|alive|gone|value:RE' >&2; exit 2 ;; esac
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
+H="$((H))"
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT=dryrun
+  jq -nc --argjson h "$H" --argjson x "$AX" --argjson y "$AY" --arg p "$PICK" --argjson d "$DWELL" \
+    --argjson t "$TIMEOUT" --arg v "$VERIFY" \
+    '{ok:true,dry_run:true,tool:"ops/hover-menu",hwnd:$h,at:{x:$x,y:$y},pick:$p,dwell_ms:$d,timeout:$t,verify:$v}'
+  exit 0
+fi
+
+op_pause_gate input
+op_focus "$H" >/dev/null || { WA_AUDIT_RESULT=ENV_NOT_FOREGROUND; op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground"; }
+
+# 1) hover and hold long enough for the provider to build the submenu
+HV="$(bash "$REPO_DIR/bin/winput" hover "$AX" "$AY" --expect-hwnd "$H" --dwell "$DWELL" --yes)"; HRC=$?
+if [ $HRC -ne 0 ]; then
+  CODE="$(printf '%s' "$HV" | jq -r '.code // "EXEC_HOVER_FAILED"')"
+  WA_AUDIT_RESULT="$CODE"; printf '%s\n' "$HV"; exit "$HRC"
+fi
+
+# 2) wait for the picked item to exist on screen
+deadline=$(( $(date +%s%3N) + TIMEOUT ))
+NODE=''; state=timeout
+while :; do
+  FJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$PICK" --on-screen --depth 10 --max 3000 --limit 100 2>/dev/null || true)"
+  NODE="$(printf '%s' "$FJ" | jq -c '[.nodes[] | select(.rect.w > 0 and .rect.h > 0)][0] // empty' 2>/dev/null || true)"
+  [ -n "$NODE" ] && { state=ok; break; }
+  [ "$(date +%s%3N)" -ge "$deadline" ] && break
+  sleep "$(awk -v ms="$INTERVAL" 'BEGIN{printf "%.3f", ms/1000}')"
+done
+if [ "$state" != ok ]; then
+  WA_AUDIT_RESULT=ENV_MENU_NOT_SHOWN
+  jq -nc --argjson h "$H" --arg p "$PICK" --argjson t "$TIMEOUT" --argjson hv "$HV" \
+    '{ok:false,code:"ENV_MENU_NOT_SHOWN",msg:("item matching " + $p + " never appeared while hovering"),hwnd:$h,timeout:$t,hover:$hv}'
+  exit 3
+fi
+
+# 3) act: provider Invoke if offered (no cursor movement, no occlusion problem), else click its center
+HASINV="$(printf '%s' "$NODE" | jq -r 'if (.patterns | index("Invoke")) then 1 else 0 end')"
+if [ "$HASINV" = 1 ]; then
+  AJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$PICK" --on-screen --depth 10 --max 3000 \
+        --limit 100 --index 0 --invoke)"; ARC=$?
+  ACT=invoke
+else
+  CX="$(printf '%s' "$NODE" | jq -r '((.rect.x + .rect.w/2) | floor) | tostring')"
+  CY="$(printf '%s' "$NODE" | jq -r '((.rect.y + .rect.h/2) | floor) | tostring')"
+  AJ="$(bash "$REPO_DIR/bin/winput" click "$CX" "$CY" --expect-hwnd "$H" --yes)"; ARC=$?
+  ACT=click
+fi
+if [ "$ARC" -ne 0 ]; then
+  CODE="$(printf '%s' "$AJ" | jq -r '.code // "EXEC_ACTION_FAILED"')"
+  WA_AUDIT_RESULT="$CODE"; printf '%s\n' "$AJ"; exit "$ARC"
+fi
+
+# 4) optional verification against the post-click state
+VERDICT='{"verify":"none"}'
+if [ "$VERIFY" != none ]; then
+  deadline=$(( $(date +%s%3N) + TIMEOUT )); vstate=timeout
+  while :; do
+    GJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$PICK" --on-screen --depth 10 --max 3000 --limit 100 2>/dev/null || true)"
+    case "$VERIFY" in
+      alive) printf '%s' "$GJ" | jq -e '.count >= 1' >/dev/null 2>&1 && vstate=ok ;;
+      gone)  printf '%s' "$GJ" | jq -e '.count == 0' >/dev/null 2>&1 && vstate=ok ;;
+      value:*)
+        want="${VERIFY#value:}"
+        VJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$PICK" --on-screen --depth 10 --max 3000 --limit 100 --index 0 --get-value 2>/dev/null || true)"
+        printf '%s' "$VJ" | jq -e --arg re "$want" '.ok == true and ((.value // "") | test($re))' >/dev/null 2>&1 && vstate=ok ;;
+    esac
+    [ "$vstate" = ok ] && break
+    [ "$(date +%s%3N)" -ge "$deadline" ] && break
+    sleep "$(awk -v ms="$INTERVAL" 'BEGIN{printf "%.3f", ms/1000}')"
+  done
+  if [ "$vstate" != ok ]; then
+    WA_AUDIT_RESULT=ENV_TIMEOUT
+    jq -nc --argjson h "$H" --arg v "$VERIFY" --argjson t "$TIMEOUT" --argjson n "$NODE" \
+      '{ok:false,code:"ENV_TIMEOUT",msg:("post-click verification " + $v + " did not hold"),hwnd:$h,timeout:$t,node:$n}'
+    exit 3
+  fi
+  VERDICT="$(jq -nc --arg v "$VERIFY" --arg s ok '{verify:$v,result:$s}')"
+fi
+
+WA_AUDIT_RESULT=ok
+jq -nc --argjson h "$H" --argjson n "$NODE" --arg a "$ACT" --argjson aj "$AJ" --argjson d "$VERDICT" --argjson hv "$HV" \
+  '{ok:true,injected:true,tool:"ops/hover-menu",hwnd:$h,node:$n,action:$a,verdict:$d,hover:$hv,result:$aj}'
+exit 0

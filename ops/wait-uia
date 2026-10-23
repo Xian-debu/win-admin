@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+# ops/wait-uia - wait until a UIA predicate holds (or stops holding). Read-only: no grant needed.
+# The predicate is evaluated against a fresh find on every poll, so it is a statement about the
+# live desktop, not about anything cached.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-wait-uia "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/wait-uia (--hwnd H | --title REGEX) [--name RE] [--type RE] [--aid RE] [--class RE]
+                   [--enabled] [--value RE] [--gone] [--timeout MS] [--interval MS]
+  waits until at least one node matches every given criterion
+  --value RE   additionally require the first match's value/text to match RE
+  --gone       invert: wait until nothing matches
+  exit 0 met | 2 arg | 3 ENV_TIMEOUT / no window | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; NAME=""; TYPE=""; AID=""; CLASS=""; ENABLED=0; VALUE=""; GONE=0
+TIMEOUT=10000; INTERVAL=150; MAX=3000; DEPTH=10
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --name) NAME="$2"; shift 2 ;;
+    --type) TYPE="$2"; shift 2 ;;
+    --aid) AID="$2"; shift 2 ;;
+    --class) CLASS="$2"; shift 2 ;;
+    --enabled) ENABLED=1; shift ;;
+    --value) VALUE="$2"; shift 2 ;;
+    --gone) GONE=1; shift ;;
+    --timeout) TIMEOUT="$2"; shift 2 ;;
+    --interval) INTERVAL="$2"; shift 2 ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --max) MAX="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$TIMEOUT$INTERVAL$MAX$DEPTH" in *[!0-9]*) echo 'numeric flags must be numbers' >&2; exit 2 ;; esac
+[ -n "$NAME$TYPE$AID$CLASS" ] || { echo 'need at least one of --name/--type/--aid/--class' >&2; exit 2; }
+[ -n "$VALUE" ] && [ "$GONE" -eq 1 ] && { echo '--value and --gone are mutually exclusive' >&2; exit 2; }
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
+H="$((H))"
+FARGS=(--hwnd "$H" --depth "$DEPTH" --max "$MAX" --limit 200 --on-screen)
+[ -n "$NAME" ] && FARGS+=(--find-name "$NAME")
+[ -n "$TYPE" ] && FARGS+=(--find-type "$TYPE")
+[ -n "$AID" ] && FARGS+=(--find-aid "$AID")
+[ -n "$CLASS" ] && FARGS+=(--find-class "$CLASS")
+[ "$ENABLED" -eq 1 ] && FARGS+=(--enabled)
+
+T0="$(date +%s%3N)"; deadline=$(( T0 + TIMEOUT )); state=timeout; seen=0; val=''
+while :; do
+  FJ="$(bash "$REPO_DIR/bin/wuia" "${FARGS[@]}" 2>/dev/null || true)"
+  seen="$(printf '%s' "$FJ" | jq -r '.count // 0' 2>/dev/null || echo 0)"
+  if [ "$GONE" -eq 1 ]; then
+    [ "$seen" = "0" ] && { state=ok; break; }
+  elif [ "${seen:-0}" -ge 1 ] 2>/dev/null; then
+    if [ -z "$VALUE" ]; then state=ok; break; fi
+    GJ="$(bash "$REPO_DIR/bin/wuia" "${FARGS[@]}" --index 0 --get-value 2>/dev/null || true)"
+    val="$(printf '%s' "$GJ" | jq -r '.value // ""' 2>/dev/null || true)"
+    if printf '%s' "$val" | grep -Eq -- "$VALUE"; then state=ok; break; fi
+  fi
+  [ "$(date +%s%3N)" -ge "$deadline" ] && break
+  sleep "$(awk -v ms="$INTERVAL" 'BEGIN{printf "%.3f", ms/1000}')"
+done
+WAITED=$(( $(date +%s%3N) - T0 ))
+
+if [ "$state" != ok ]; then
+  WA_AUDIT_RESULT=ENV_TIMEOUT
+  jq -nc --argjson h "$H" --argjson t "$TIMEOUT" --argjson w "$WAITED" --argjson s "${seen:-0}" \
+    --arg n "$NAME" --arg v "$VALUE" --argjson g "$GONE" \
+    '{ok:false,code:"ENV_TIMEOUT",msg:("predicate did not hold within " + ($t|tostring) + " ms"),hwnd:$h,waited_ms:$w,seen:$s,name:$n,value:$v,gone:$g}'
+  exit 3
+fi
+WA_AUDIT_RESULT=ok
+jq -nc --argjson h "$H" --argjson w "$WAITED" --argjson s "${seen:-0}" --arg n "$NAME" --arg v "$VALUE" \
+  --arg got "$val" --argjson g "$GONE" \
+  '{ok:true,tool:"ops/wait-uia",hwnd:$h,waited_ms:$w,count:$s,name:$n,value:$v,value_seen:$got,gone:$g}'
+exit 0
