@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Title = 'wa-uia',
     [string]$OutFile = 'C:/Users/Public/win-admin/tmp/uiawnd.json'
 )
@@ -53,6 +53,14 @@ $script:cyclen = 0
 # can prove "click -> observable state change" without a second target.
 $cyc.Add_Click({ $script:cyclen = $script:cyclen + 1; $cyc.Content = 'CYCLE-' + $script:cyclen; Log ('cycle ' + $script:cyclen) })
 $root.Children.Add($cyc) | Out-Null
+
+$dgr = New-Object System.Windows.Controls.Button
+$dgr.Content = '删除'
+$dgr.Height = 32
+$dgr.Margin = New-Object System.Windows.Thickness(0, 2, 0, 2)
+[System.Windows.Automation.AutomationProperties]::SetAutomationId($dgr, 'wa-danger')
+$dgr.Add_Click({ Log 'danger clicked' })
+$root.Children.Add($dgr) | Out-Null
 
 $dis = New-Object System.Windows.Controls.Button
 $dis.Content = 'BTN-DISABLED'

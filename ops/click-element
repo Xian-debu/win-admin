@@ -15,13 +15,15 @@ usage() {
   cat <<'EOF'
 usage: ops/click-element (--hwnd H | --title REGEX) [--name RE] [--type RE] [--aid RE] [--class RE]
                         [--index N] [--double] [--strategy invoke|click] [--verify SPEC]
-                        [--timeout MS] [--interval MS] [--yes]
+                        [--timeout MS] [--interval MS] [--allow-danger] [--yes]
   --name/--type/--aid/--class   find criteria (at least one)
   --strategy   invoke (UIA, no cursor) or click (rect center); default: auto
   --verify     value:RE  the element's value/text must match RE after the action
                gone:RE   no element matching RE may exist after the action (dialog closed)
                alive     default: the same find criteria still resolve to a node
   --timeout    verification deadline in ms (default 3000)
+  --allow-danger  required to act on a node whose name looks destructive
+               (删除|购买|提交|支付|下单|格式化|delete|buy|submit|pay|order|format)
   default      dry-run: print the candidates, the chosen node and the strategy
   exit 0 ok | 2 arg | 3 env (no node / verify timeout) | 4 guard | 5 exec
 EOF
@@ -29,6 +31,10 @@ EOF
 
 HWND=0; TITLE=""; NAME=""; TYPE=""; AID=""; CLASS=""; IDX=0
 DOUBLE=0; STRATEGY=auto; VERIFY=alive; TIMEOUT=3000; INTERVAL=150; REAL=0; DEPTH=10; MAX=3000
+ALLOW_DANGER=0
+# S9: destructive-looking names are refused by default. This is not a technical limit, it is a
+# deliberate speed bump: a mis-resolved node named "删除" costs more than one extra flag.
+DANGER_RE='删除|购买|提交|支付|下单|格式化|清空|重置|delete|remove|buy|submit|pay|order|format|reset'
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
@@ -46,6 +52,7 @@ while [ $# -gt 0 ]; do
     --interval) INTERVAL="$2"; shift 2 ;;
     --depth) DEPTH="$2"; shift 2 ;;
     --max) MAX="$2"; shift 2 ;;
+    --allow-danger) ALLOW_DANGER=1; shift ;;
     --yes) REAL=1; shift ;;
     --dry-run) REAL=0; shift ;;
     *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
@@ -73,7 +80,9 @@ H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
 H="$((H))"
 find_args
 FJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}")" || op_die EXEC_UIA "wuia find failed for hwnd $H"
-NODE="$(printf '%s' "$FJ" | jq -c --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0 and .enabled == true)][$i] // empty')"
+# Select on geometry only; actionability (enabled/offscreen) is judged after the dry-run, so a
+# refused node can still be inspected and a disabled node reports a distinct code (C11).
+NODE="$(printf '%s' "$FJ" | jq -c --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0)][$i] // empty')"
 [ -n "$NODE" ] || op_die ENV_NO_NODE "no control matched (hwnd=$H name=$NAME type=$TYPE aid=$AID class=$CLASS index=$IDX)"
 
 HASINV="$(printf '%s' "$NODE" | jq -r 'if (.patterns | index("Invoke")) then 1 else 0 end')"
@@ -91,6 +100,19 @@ if [ "$REAL" -eq 0 ]; then
     '{ok:true,dry_run:true,tool:"ops/click-element",hwnd:$h,candidates:$c,node:$n,strategy:$s,point:{x:$x,y:$y},verify:$v}'
   exit 0
 fi
+
+if [ "$(printf '%s' "$NODE" | jq -r '.enabled')" != "true" ] || [ "$(printf '%s' "$NODE" | jq -r '.offscreen')" = "true" ]; then
+  WA_AUDIT_RESULT=ENV_ELEMENT_NOT_ACTIONABLE
+  jq -nc --argjson h "$H" --argjson n "$NODE" --argjson i "$IDX"     '{ok:false,code:"ENV_ELEMENT_NOT_ACTIONABLE",msg:"element is disabled or offscreen",hwnd:$h,node:$n,index:$i}'
+  exit 3
+fi
+NODENAME="$(printf '%s' "$NODE" | jq -r '.name // ""')"
+if [ "$ALLOW_DANGER" -eq 0 ] && printf '%s' "$NODENAME" | grep -qiE "$DANGER_RE"; then
+  WA_AUDIT_RESULT=ENV_DANGEROUS_ACTION
+  jq -nc --argjson h "$H" --argjson n "$NODE" --arg re "$DANGER_RE"     '{ok:false,code:"ENV_DANGEROUS_ACTION",msg:"refusing to act on a destructive-looking node; pass --allow-danger if this is intended",hwnd:$h,node:$n,danger_re:$re}'
+  exit 3
+fi
+
 
 op_pause_gate input
 ACTION=""

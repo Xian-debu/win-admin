@@ -129,6 +129,36 @@ else
   fail "N22 arg contracts: $c22a/$c22b/$c22c/$c22d/$c22e/$c22f (want all 2)"
 fi
 
+# ---- N24: S9 destructive-name guard (default refuse, --allow-danger overrides) ----
+CE24="$(ops/click-element --hwnd "$UH" --aid wa-danger --yes 2>/dev/null)"; c24=$?
+if [ "$c24" -eq 3 ] && [ "$(printf %s "$CE24" | jq -r .code)" = "ENV_DANGEROUS_ACTION" ]; then
+  pass "N24 dangerous node refused: ENV_DANGEROUS_ACTION rc=3"
+else
+  fail "N24 danger guard: rc=$c24 code=$(printf %s "$CE24" | jq -r .code)"
+fi
+CE24b="$(ops/click-element --hwnd "$UH" --aid wa-danger --allow-danger --yes 2>/dev/null)"; c24b=$?
+if [ "$c24b" -eq 0 ] && printf %s "$CE24b" | jq -e ".ok == true" >/dev/null; then
+  pass "N24b --allow-danger permits the same node"
+else
+  fail "N24b --allow-danger: rc=$c24b $(printf %s "$CE24b" | jq -c "{code}")"
+fi
+
+# ---- N25: C11 disabled element -> ENV_ELEMENT_NOT_ACTIONABLE (not "not found") ----
+CE25="$(ops/click-element --hwnd "$UH" --aid wa-disabled --yes 2>/dev/null)"; c25=$?
+if [ "$c25" -eq 3 ] && [ "$(printf %s "$CE25" | jq -r .code)" = "ENV_ELEMENT_NOT_ACTIONABLE" ]; then
+  pass "N25 disabled element -> ENV_ELEMENT_NOT_ACTIONABLE rc=3"
+else
+  fail "N25 disabled element: rc=$c25 code=$(printf %s "$CE25" | jq -r .code)"
+fi
+
+# ---- N26: dry-run still lets a dangerous node be inspected (no refusal before the preview) ----
+CE26="$(ops/click-element --hwnd "$UH" --aid wa-danger 2>/dev/null)"; c26=$?
+if [ "$c26" -eq 0 ] && printf %s "$CE26" | jq -e ".dry_run == true" >/dev/null; then
+  pass "N26 dry-run previews dangerous node without acting"
+else
+  fail "N26 dry-run dangerous preview: rc=$c26"
+fi
+
 # ---- N23: no grant -> the acting ops are refused with rc=4 ----
 rm -f "$G"
 ops/click-element --hwnd "$UH" --aid wa-btn --yes >/dev/null 2>&1; c23a=$?
