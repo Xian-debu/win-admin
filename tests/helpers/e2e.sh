@@ -27,8 +27,16 @@ c8_once() {
   fi
   bash bin/wwin close --hwnd "$h" >/dev/null 2>&1 || true
   sleep 0.6
-  if bash bin/wwin info --hwnd "$h" >/dev/null 2>&1; then
-    echo "$(( $(date +%s%3N) - t0 )) false close:window-still-open"; return 1
+  if ti="$(bash bin/wwin info --hwnd "$h" 2>/dev/null | jq -r '.window.title // ""')" && [ -n "$ti" ]; then
+    # K46: Win11 Notepad is single-instance multi-tab (K29, extended). When the user already has a
+    # Notepad window, `notepad <file>` opens a TAB inside it, so WM_CLOSE closes the tab and the
+    # shared window survives -- hwnd existence is the wrong assertion. Assert on OUR title instead:
+    # if the prefix is gone, our document is closed (the window belongs to someone else now).
+    case "$ti" in
+      *"$prefix-$tag"*)
+        echo "$(( $(date +%s%3N) - t0 )) false close:window-still-open[$ti]"; return 1 ;;
+      *) : ;;
+    esac
   fi
   echo "$(( $(date +%s%3N) - t0 )) true"
 }

@@ -135,7 +135,17 @@ if [ "$RC" = "0" ] && [ "$(printf "%s" "$OUT" | jq -r '.mode // empty' 2>/dev/nu
 say "C8-6 wwin close -> window gone, unsaved dialog handled by app"
 bash bin/wwin close --hwnd "$H" >/dev/null 2>&1 || true
 sleep 0.8
-if [ "$(cat "$WF" 2>/dev/null || true)" = "M4 验收：中文输入、emoji ✅、第二行" ] && ! bash bin/wwin info --hwnd "$H" >/dev/null 2>&1; then ok "C8-6 closed cleanly (no dirty prompt)"; else bad "C8-6 window still open or content changed"; fi
+# K46: Win11 Notepad 单实例多标签 —— 若用户已有记事本窗口，`notepad <file>` 是在其中开标签页，
+# WM_CLOSE 只关标签页、共享窗口仍在。判据改成"我们的标题消失"，而不是 hwnd 消失。
+TI="$(bash bin/wwin info --hwnd "$H" 2>/dev/null | jq -r '.window.title // ""')"
+if [ "$(cat "$WF" 2>/dev/null || true)" = "M4 验收：中文输入、emoji ✅、第二行" ]; then
+  case "$TI" in
+    *"m4-c8-1"*) bad "C8-6 window still open (title=$TI)" ;;
+    *) ok "C8-6 closed cleanly (no dirty prompt)" ;;
+  esac
+else
+  bad "C8-6 content changed"
+fi
 
 # ------------------------------------------------------------------ E8 repeatability
 say "E8 three consecutive end-to-end rounds (C8), each <60s"

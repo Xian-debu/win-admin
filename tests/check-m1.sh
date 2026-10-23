@@ -119,12 +119,19 @@ if [ -n "$hx" ]; then
   elif [ -n "$rect_win" ]; then
     read -r ux uy uw uh <<< "$rect_uia"
     read -r wx wy ww wh <<< "$rect_win"
-    dx=$(( ux>wx ? ux-wx : wx-ux )); dy=$(( uy>wy ? uy-wy : wy-uy ))
-    dw=$(( uw>ww ? uw-ww : ww-uw )); dh=$(( uh>wh ? uh-wh : wh-uh ))
-    if [ "$dx" -le 2 ] && [ "$dy" -le 2 ] && [ "$dw" -le 2 ] && [ "$dh" -le 2 ]; then
-      ok C3 "uia[$rect_uia] vs win[$rect_win]"
+    # K36 (v1.1 expansion): a minimized window reports (-32000,-32000) from GetWindowRect; UIA may
+    # return a NULL rect OR an all-zero one depending on the toolkit. Either way there is no
+    # geometry to compare -- decide on the *window* side marker, not on the UIA shape.
+    if [ "$wx" -le -30000 ] || [ "$wy" -le -30000 ]; then
+      sk C3 "target window is minimized (win rect -32000) - no geometry to compare"
     else
-      no C3 "uia[$rect_uia] vs win[$rect_win] (d=$dx,$dy,$dw,$dh)"
+      dx=$(( ux>wx ? ux-wx : wx-ux )); dy=$(( uy>wy ? uy-wy : wy-uy ))
+      dw=$(( uw>ww ? uw-ww : ww-uw )); dh=$(( uh>wh ? uh-wh : wh-uh ))
+      if [ "$dx" -le 2 ] && [ "$dy" -le 2 ] && [ "$dw" -le 2 ] && [ "$dh" -le 2 ]; then
+        ok C3 "uia[$rect_uia] vs win[$rect_win]"
+      else
+        no C3 "uia[$rect_uia] vs win[$rect_win] (d=$dx,$dy,$dw,$dh)"
+      fi
     fi
   else
     no C3 "hwnd $hx not in wwin list"
