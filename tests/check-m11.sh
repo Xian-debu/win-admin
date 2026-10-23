@@ -159,6 +159,18 @@ else
   fail "N26 dry-run dangerous preview: rc=$c26"
 fi
 
+# ---- N27: auto-deepen contract (docs/18) ----
+# Shallow fixture: normal hit must report deepened=false; a real miss must still be ENV_NO_NODE
+# (after one deeper retry), not silently "not found" at the shallow depth.
+CE27="$(ops/click-element --hwnd "$UH" --aid wa-btn 2>/dev/null)"
+CE27b="$(ops/click-element --hwnd "$UH" --name 'no-such-node-xyz' 2>/dev/null)"; c27b=$?
+if printf '%s' "$CE27" | jq -e '.ok == true and .deepened == false' >/dev/null 2>&1 \
+   && [ "$c27b" -eq 3 ] && [ "$(printf %s "$CE27b" | jq -r .code)" = "ENV_NO_NODE" ]; then
+  pass "N27 auto-deepen: shallow hit deepened=false, miss -> ENV_NO_NODE rc=3"
+else
+  fail "N27 auto-deepen: hit=$(printf '%s' "$CE27" | jq -c '{ok,deepened}') miss rc=$c27b code=$(printf %s "$CE27b" | jq -r .code)"
+fi
+
 # ---- N23: no grant -> the acting ops are refused with rc=4 ----
 rm -f "$G"
 ops/click-element --hwnd "$UH" --aid wa-btn --yes >/dev/null 2>&1; c23a=$?

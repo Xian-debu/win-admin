@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>wa-web11 语义试验页</title>
+<style>body{font-family:Segoe UI,sans-serif;margin:24px;max-width:900px}button{margin:4px;padding:6px 12px}
+.item{border:1px solid #ccc;padding:8px;margin:6px 0}</style></head>
+<body>
+<h1 id="h1">wa-web11 语义试验页</h1>
+<p id="p1">这一段是正文段落，用来比较三种读取通道的覆盖率：UIA 无障碍树、受管 CDP 的 innerText、以及剪贴板全选复制。</p>
+<p id="p2">Paragraph two is ASCII only, to check whether mixed-language text is truncated by any channel.</p>
+<div class="item" id="i1"><a href="#x" id="lnk">一个普通链接</a> - 列表项一，含<span style="color:#c00">内联强调</span>。</div>
+<div class="item" id="i2"><a href="#y">第二个链接</a> - 列表项二，数字 1234567890。</div>
+<div class="item" id="i3"><button id="btn1">按钮甲</button><button id="btn2">按钮乙</button> 列表项三，含按钮。</div>
+<label for="inp">输入框：</label><input id="inp" value="初始值-abc"><br>
+<select id="sel"><option>选项一</option><option>选项二</option></select>
+<table><tr><th>列A</th><th>列B</th></tr><tr><td>格1</td><td>格2</td></tr></table>
+<textarea id="ta" rows="2" cols="40">多行文本域内容 first line / second line</textarea>
+<div aria-hidden="true" id="hidden" style="display:none">这段是隐藏的，不应出现在可见语义里。</div>
+<p id="tail">结尾段落：覆盖率统计的锚点文字。END-OF-PAGE-MARKER</p>
+<script>document.getElementById('btn1').addEventListener('click',function(){document.title='clicked-btn1';});
+setTimeout(function(){document.getElementById('tail').textContent += ' [动态插入于 1.5s]';},1500);</script>
+</body></html>

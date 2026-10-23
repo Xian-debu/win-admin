@@ -30,7 +30,7 @@ EOF
 }
 
 HWND=0; TITLE=""; NAME=""; TYPE=""; AID=""; CLASS=""; IDX=0
-DOUBLE=0; STRATEGY=auto; VERIFY=alive; TIMEOUT=3000; INTERVAL=150; REAL=0; DEPTH=10; MAX=3000
+DOUBLE=0; STRATEGY=auto; VERIFY=alive; TIMEOUT=3000; INTERVAL=150; REAL=0; DEPTH=10; MAX=3000; DEEPENED=0
 ALLOW_DANGER=0
 # S9: destructive-looking names are refused by default. This is not a technical limit, it is a
 # deliberate speed bump: a mis-resolved node named "删除" costs more than one extra flag.
@@ -78,11 +78,17 @@ find_args() {
 H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
 [ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
 H="$((H))"
-find_args
-FJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}")" || op_die EXEC_UIA "wuia find failed for hwnd $H"
+# select_node: find -> pick the IDX-th node that has real geometry.
 # Select on geometry only; actionability (enabled/offscreen) is judged after the dry-run, so a
 # refused node can still be inspected and a disabled node reports a distinct code (C11).
-NODE="$(printf '%s' "$FJ" | jq -c --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0)][$i] // empty')"
+select_node() { FJ="$(bash "$REPO_DIR/bin/wuia" "${FIND_ARGS[@]}")" || op_die EXEC_UIA "wuia find failed for hwnd $H"; NODE="$(printf '%s' "$FJ" | jq -c --argjson i "$IDX" '[.nodes[] | select(.rect.w > 0 and .rect.h > 0)][$i] // empty')"; }
+find_args
+select_node
+# v1.1.1 auto-deepen: web content inside Chromium lives at depth 12+ (docs/18), while the default
+# depth (10) only reaches browser chrome. On a miss, retry once deeper before declaring ENV_NO_NODE.
+if [ -z "$NODE" ] && [ "$DEPTH" -lt 16 ]; then
+  DEPTH=16; MAX=8000; find_args; select_node; DEEPENED=1
+fi
 [ -n "$NODE" ] || op_die ENV_NO_NODE "no control matched (hwnd=$H name=$NAME type=$TYPE aid=$AID class=$CLASS index=$IDX)"
 
 HASINV="$(printf '%s' "$NODE" | jq -r 'if (.patterns | index("Invoke")) then 1 else 0 end')"
@@ -97,7 +103,8 @@ if [ "$REAL" -eq 0 ]; then
   WA_AUDIT_RESULT=dryrun
   jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" \
     --argjson x "$CX" --argjson y "$CY" --argjson c "$(printf '%s' "$FJ" | jq '.count')" \
-    '{ok:true,dry_run:true,tool:"ops/click-element",hwnd:$h,candidates:$c,node:$n,strategy:$s,point:{x:$x,y:$y},verify:$v}'
+    --argjson d "$DEEPENED" \
+    '{ok:true,dry_run:true,tool:"ops/click-element",hwnd:$h,candidates:$c,node:$n,strategy:$s,point:{x:$x,y:$y},verify:$v,deepened:($d==1)}'
   exit 0
 fi
 
@@ -181,6 +188,6 @@ fi
 
 WA_AUDIT_RESULT=ok
 jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" --arg a "$ACTION" \
-  --argjson aj "$AJ" --argjson d "$detail" --argjson x "$CX" --argjson y "$CY" \
-  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj}'
+  --argjson aj "$AJ" --argjson d "$detail" --argjson x "$CX" --argjson y "$CY" --argjson dp "$DEEPENED" \
+  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj,deepened:($dp==1)}'
 exit 0

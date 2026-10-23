@@ -47,17 +47,26 @@ case "$TIMEOUT$INTERVAL$MAX$DEPTH" in *[!0-9]*) echo 'numeric flags must be numb
 H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
 [ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
 H="$((H))"
-FARGS=(--hwnd "$H" --depth "$DEPTH" --max "$MAX" --limit 200 --on-screen)
-[ -n "$NAME" ] && FARGS+=(--find-name "$NAME")
-[ -n "$TYPE" ] && FARGS+=(--find-type "$TYPE")
-[ -n "$AID" ] && FARGS+=(--find-aid "$AID")
-[ -n "$CLASS" ] && FARGS+=(--find-class "$CLASS")
-[ "$ENABLED" -eq 1 ] && FARGS+=(--enabled)
+build_fargs() {
+  FARGS=(--hwnd "$H" --depth "$DEPTH" --max "$MAX" --limit 200 --on-screen)
+  [ -n "$NAME" ] && FARGS+=(--find-name "$NAME")
+  [ -n "$TYPE" ] && FARGS+=(--find-type "$TYPE")
+  [ -n "$AID" ] && FARGS+=(--find-aid "$AID")
+  [ -n "$CLASS" ] && FARGS+=(--find-class "$CLASS")
+  [ "$ENABLED" -eq 1 ] && FARGS+=(--enabled)
+}
+build_fargs
+DEEPENED=0
 
 T0="$(date +%s%3N)"; deadline=$(( T0 + TIMEOUT )); state=timeout; seen=0; val=''
 while :; do
   FJ="$(bash "$REPO_DIR/bin/wuia" "${FARGS[@]}" 2>/dev/null || true)"
   seen="$(printf '%s' "$FJ" | jq -r '.count // 0' 2>/dev/null || echo 0)"
+  # v1.1.1 auto-deepen (docs/18): Chromium web content sits at depth 12+, so a shallow search can
+  # see nothing on a perfectly loaded page. Deepen once before trusting a "not seen" result.
+  if [ "$seen" = "0" ] && [ "$DEEPENED" -eq 0 ] && [ "$DEPTH" -lt 16 ]; then
+    DEPTH=16; MAX=8000; build_fargs; DEEPENED=1; continue
+  fi
   if [ "$GONE" -eq 1 ]; then
     [ "$seen" = "0" ] && { state=ok; break; }
   elif [ "${seen:-0}" -ge 1 ] 2>/dev/null; then
