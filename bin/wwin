@@ -1,27 +1,48 @@
 #!/usr/bin/env bash
-# bin/wwin - window inventory: list (all visible top-level windows), info (one hwnd), focus (bring to front, no input injection).
+# bin/wwin - window inventory and window state control.
+#   list/info/focus/close : read or gentle foreground ops (no synthetic input).
+#   state                 : full window state (normal/minimized/maximized, topmost, rect, work area).
+#   set                   : maximize/minimize/restore/move/resize/topmost. Dry-run by default;
+#                           real changes need --yes AND an unexpired grant covering input.
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
+usage() {
+  cat <<'EOF'
+usage:
+  wwin list
+  wwin info  --hwnd 0x1234
+  wwin focus --hwnd 0x1234
+  wwin close --hwnd 0x1234
+  wwin state --hwnd 0x1234
+  wwin set   --hwnd 0x1234 [--state max|min|restore|normal]
+                          [--x N] [--y N] [--w N] [--h N] [--topmost on|off]
+                          [--yes] [--dry-run]
+
+set flags:
+  --yes            actually apply (default is --dry-run; --yes needs an input grant)
+  --dry-run        only print the plan plus the current state (default)
+  --state max      maximize        --state restore  un-maximize / un-minimize
+  --state min      minimize        --state normal   plain normal window
+  --x/--y          move to that screen position (physical px, per-monitor-v2 aware)
+  --w/--h          resize (width/height in physical px)
+  --topmost on|off z-order pin
+
+Every set prints before/after and FAILS (ENV_STATE_UNCHANGED, exit 3) when the window did not
+actually end up in the requested state - a silent no-op is an error here, not a success.
+
+exit 0 ok | 2 arg | 3 ENV_NO_WINDOW / ENV_NOT_FOREGROUND / ENV_STATE_UNCHANGED | 4 guard | 5 exec
+EOF
+}
+
 sub="${1:-list}"
 case "$sub" in
-  -h|--help|help)
-    cat <<'EOF'
-usage: wwin list
-       wwin info --hwnd 0x1234
-       wwin focus --hwnd 0x1234
-       wwin close --hwnd 0x1234
-  Lists visible top-level windows (hwnd, title, class, pid, process, rect), one window's state,
-  brings a window to the foreground without synthetic input,
-  or posts a graceful WM_CLOSE (the app decides; a dirty document may prompt).
-  exit 0 ok | 2 arg | 3 ENV_NO_WINDOW / ENV_NOT_FOREGROUND | 5 exec failure
-EOF
-    exit 0 ;;
+  -h|--help|help) usage; exit 0 ;;
   list)
     shift || true
     raw="$(wa_run wwin -Action list)"
     wa_finish "$raw" ;;
-  info)
+  info|focus|close|state)
     shift || true
     H=""
     while [ $# -gt 0 ]; do
@@ -30,32 +51,77 @@ EOF
         *) echo "unknown arg: $1" >&2; exit 2 ;;
       esac
     done
-    [ -n "$H" ] || { echo "info needs --hwnd" >&2; exit 2; }
-    raw="$(wa_run wwin -Action info -Hwnd "$((H))")"
+    [ -n "$H" ] || { echo "$sub needs --hwnd" >&2; exit 2; }
+    raw="$(wa_run wwin -Action "$sub" -Hwnd "$((H))")"
     wa_finish "$raw" ;;
-  focus)
+  set)
     shift || true
-    H=""
+    . "$(dirname "$0")/../lib/audit.sh"
+    wa_audit_init wwin set "$@"
+    H=""; ST=""; SX=""; SY=""; SW=""; SH=""; TOP=""; REAL=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --hwnd) H="$2"; shift 2 ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
+        --state) ST="$2"; shift 2 ;;
+        --x) SX="$2"; shift 2 ;;
+        --y) SY="$2"; shift 2 ;;
+        --w) SW="$2"; shift 2 ;;
+        --h) SH="$2"; shift 2 ;;
+        --topmost) TOP="$2"; shift 2 ;;
+        --yes) REAL=1; shift ;;
+        --dry-run) REAL=0; shift ;;
+        *) WA_AUDIT_RESULT=ARG_UNKNOWN_FLAG; echo "unknown arg: $1" >&2; exit 2 ;;
       esac
     done
-    [ -n "$H" ] || { echo "focus needs --hwnd" >&2; exit 2; }
-    raw="$(wa_run wwin -Action focus -Hwnd "$((H))")"
-    wa_finish "$raw" ;;
-  close)
-    shift || true
-    H=""
-    while [ $# -gt 0 ]; do
-      case "$1" in
-        --hwnd) H="$2"; shift 2 ;;
-        *) echo "unknown arg: $1" >&2; exit 2 ;;
-      esac
+    [ -n "$H" ] || { WA_AUDIT_RESULT=ARG_NEED_TARGET; echo "set needs --hwnd" >&2; exit 2; }
+    case "$ST" in ''|max|min|restore|normal) ;; *)
+      WA_AUDIT_RESULT=ARG_BAD_STATE; echo "bad --state: $ST (max|min|restore|normal)" >&2; exit 2 ;;
+    esac
+    case "$TOP" in ''|on|off) ;; *)
+      WA_AUDIT_RESULT=ARG_BAD_TOPMOST; echo "bad --topmost: $TOP (on|off)" >&2; exit 2 ;;
+    esac
+    if [ -z "$ST" ] && [ -z "$SX" ] && [ -z "$SY" ] && [ -z "$SW" ] && [ -z "$SH" ] && [ -z "$TOP" ]; then
+      WA_AUDIT_RESULT=ARG_NOTHING_TO_DO
+      echo "set needs at least one of --state/--x/--y/--w/--h/--topmost" >&2; exit 2
+    fi
+    for v in "$SX" "$SY" "$SW" "$SH"; do
+      if [ -n "$v" ]; then
+        case "$v" in *[!0-9-]*) WA_AUDIT_RESULT=ARG_BAD_GEOMETRY; echo "not a number: $v" >&2; exit 2 ;; esac
+      fi
     done
-    [ -n "$H" ] || { echo "close needs --hwnd" >&2; exit 2; }
-    raw="$(wa_run wwin -Action close -Hwnd "$((H))")"
-    wa_finish "$raw" ;;
-  *) echo "unsupported action: $sub (list|info|focus|close)" >&2; exit 2 ;;
+    # A real state change is input-grade (S9): guard + audit, exactly like winput.
+    if [ "$REAL" -eq 1 ]; then
+      g="$(bash "$REPO_DIR/guard/check.sh" input)"
+      grc=$?
+      if [ $grc -ne 0 ]; then
+        WA_AUDIT_RESULT="$(printf '%s' "$g" | jq -r '.code // "GUARD_DENIED"' 2>/dev/null || echo GUARD_DENIED)"
+        printf '%s\n' "$g"; exit $grc
+      fi
+    fi
+    args=(wwin -Version "$VERSION" -Action set -Hwnd "$((H))")
+    [ -n "$ST" ] && args+=(-State "$ST")
+    [ -n "$SX" ] && args+=(-X "$SX")
+    [ -n "$SY" ] && args+=(-Y "$SY")
+    [ -n "$SW" ] && args+=(-Width "$SW")
+    [ -n "$SH" ] && args+=(-Height "$SH")
+    [ -n "$TOP" ] && args+=(-Topmost "$TOP")
+    [ "$REAL" -eq 0 ] && args+=(-DryRun)
+    raw="$(wa_run "${args[@]}")"
+    j="$(wa_json_of "$raw")"
+    if [ -z "$j" ]; then
+      WA_AUDIT_RESULT=EXEC_NO_JSON
+      printf '%s\n' "$raw" >&2
+      wa_err_json EXEC_FAIL "no JSON from payload (see stderr)"
+      exit 5
+    fi
+    printf '%s\n' "$j"
+    if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+      if [ "$REAL" -eq 1 ]; then WA_AUDIT_RESULT=ok; else WA_AUDIT_RESULT=dryrun; fi
+      exit 0
+    fi
+    code="$(printf '%s' "$j" | jq -r '.code // "EXEC_FAIL"' 2>/dev/null)"
+    [ -n "$code" ] || code=EXEC_FAIL
+    WA_AUDIT_RESULT="$code"
+    wa_exit_for "$code" ;;
+  *) echo "unsupported action: $sub (list|info|focus|close|state|set)" >&2; exit 2 ;;
 esac

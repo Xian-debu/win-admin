@@ -39,6 +39,16 @@ public delegate bool EnumProc(IntPtr h, IntPtr p);
 [DllImport("user32.dll")] public static extern bool AttachThreadInput(uint a, uint b, bool attach);
 [DllImport("kernel32.dll")] public static extern uint GetCurrentThreadId();
 [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr h, uint msg, IntPtr w, IntPtr l);
+[DllImport("user32.dll")] public static extern bool GetWindowPlacement(IntPtr h, ref WINDOWPLACEMENT p);
+[DllImport("user32.dll")] public static extern bool SetWindowPlacement(IntPtr h, ref WINDOWPLACEMENT p);
+[DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr h, IntPtr after, int x, int y, int cx, int cy, uint flags);
+[DllImport("user32.dll", EntryPoint = "GetWindowLongPtrW")] public static extern IntPtr GetWindowLongPtr(IntPtr h, int idx);
+[DllImport("user32.dll")] public static extern bool SystemParametersInfo(uint a, uint b, ref RECT r, uint f);
+[StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
+[StructLayout(LayoutKind.Sequential)] public struct WINDOWPLACEMENT {
+    public int length; public int flags; public int showCmd;
+    public POINT ptMinPosition; public POINT ptMaxPosition; public RECT rcNormalPosition;
+}
 '@
 }
 
@@ -178,6 +188,59 @@ function Set-WaForeground([IntPtr]$h) {
         Start-Sleep -Milliseconds 50
     }
     return $false
+}
+
+# ---- window state (v1.1, docs/17 T1) ----
+# GetWindowPlacement is the only reliable read: GetWindowRect on a maximized window returns
+# the off-screen border rect, so "is it maximized" must come from showCmd, not from geometry.
+function Get-WaPlacement([IntPtr]$h) {
+    $p = New-Object Wa.Native+WINDOWPLACEMENT
+    $p.length = [System.Runtime.InteropServices.Marshal]::SizeOf($p)
+    $ok = [Wa.Native]::GetWindowPlacement($h, [ref]$p)
+    $names = @{ 0 = 'hidden'; 1 = 'normal'; 2 = 'minimized'; 3 = 'maximized' }
+    $st = if ($names.ContainsKey($p.showCmd)) { $names[$p.showCmd] } else { 'unknown' }
+    [ordered]@{
+        ok         = $ok
+        showCmd    = $p.showCmd
+        state      = $st
+        rectNormal = [ordered]@{
+            x = $p.rcNormalPosition.Left; y = $p.rcNormalPosition.Top
+            w = ($p.rcNormalPosition.Right - $p.rcNormalPosition.Left)
+            h = ($p.rcNormalPosition.Bottom - $p.rcNormalPosition.Top)
+        }
+    }
+}
+
+function Get-WaTopmost([IntPtr]$h) {
+    # GWL_EXSTYLE = -20; WS_EX_TOPMOST = 0x8
+    $ex = [Wa.Native]::GetWindowLongPtr($h, -20).ToInt64()
+    return (($ex -band 0x8) -ne 0)
+}
+
+function Get-WaWindowState([IntPtr]$h) {
+    $w = Get-WaWindowInfo $h
+    $pl = Get-WaPlacement $h
+    [ordered]@{
+        hwnd      = $w.hwnd
+        hwnd_dec  = $w.hwnd_dec
+        title     = $w.title
+        process   = $w.process
+        visible   = $w.visible
+        minimized = ($pl.showCmd -eq 2)
+        maximized = ($pl.showCmd -eq 3)
+        state     = $pl.state
+        topmost   = (Get-WaTopmost $h)
+        rect      = $w.rect
+        rectNormal = $pl.rectNormal
+    }
+}
+
+function Get-WaWorkArea {
+    $a = New-Object Wa.Native+RECT
+    $ok = $false
+    try { $ok = [Wa.Native]::SystemParametersInfo(0x0030, 0, [ref]$a, 0) } catch { }
+    if (-not $ok) { return (Get-WaScreen) }
+    [ordered]@{ x = $a.Left; y = $a.Top; w = ($a.Right - $a.Left); h = ($a.Bottom - $a.Top) }
 }
 
 function Get-WaTopWindows {
