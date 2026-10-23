@@ -7,6 +7,10 @@ param(
     [string]$Button = 'left',
     [int]$Count = 1,
     [int]$Steps = 20,
+    [int]$Delta = 120,
+    [int]$Times = 1,
+    [switch]$Horizontal,
+    [int]$Dwell = 600,
     [string]$Combo = '',
     [string]$TextFile = '',
     [long]$ExpectHwnd = 0,
@@ -19,6 +23,7 @@ $env:WA_VERSION = $Version
 . $Core
 $dpi = Set-WaDpi
 Add-Type -AssemblyName System.Windows.Forms | Out-Null
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase | Out-Null
 
 Add-Type -Namespace WaInput -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetCursorPos(int X, int Y);
@@ -101,6 +106,51 @@ function Assert-Target([IntPtr]$target, [int]$px, [int]$py, [bool]$needPoint, [b
     return @{ ok = $true; foreground = $fg }
 }
 
+# Hover/wheel targets may be popups (menus, tooltips, combo drop-downs): their root window is
+# NOT the app's main window, so match on the owning process instead of the root hwnd (T2).
+function Assert-TargetPid([IntPtr]$target, [int]$px, [int]$py) {
+    if (-not [Wa.Native]::IsWindow($target)) { return @{ ok = $false; code = 'ENV_NO_WINDOW'; msg = 'target hwnd is not a window' } }
+    $pt = New-Object WaInput.Native+POINT
+    $pt.X = $px; $pt.Y = $py
+    $underRaw = [WaInput.Native]::WindowFromPoint($pt)
+    if ($underRaw -eq [IntPtr]::Zero) {
+        return @{ ok = $false; code = 'ENV_WINDOW_MISMATCH'; msg = "no window at ($px,$py)" }
+    }
+    $under = Get-Root $underRaw
+    if ($under -eq $target) { return @{ ok = $true; under = $under; matched = 'hwnd' } }
+    $tp = 0; $up = 0
+    [void][Wa.Native]::GetWindowThreadProcessId($target, [ref]$tp)
+    [void][Wa.Native]::GetWindowThreadProcessId($underRaw, [ref]$up)
+    if ($tp -gt 0 -and $tp -eq $up) { return @{ ok = $true; under = $under; matched = 'pid'; pid = $tp } }
+    return @{ ok = $false; code = 'ENV_WINDOW_MISMATCH'; msg = ("point ($px,$py) hits hwnd 0x" + $under.ToInt64().ToString('x') + " of pid $up, expected hwnd 0x" + $target.ToInt64().ToString('x') + " of pid $tp") }
+}
+
+# What is under the cursor right now? window (Win32) + element (UIA) - the verifiable half of hover.
+function Get-PointProbe([int]$px, [int]$py) {
+    $pt = New-Object WaInput.Native+POINT
+    $pt.X = $px; $pt.Y = $py
+    $raw = [WaInput.Native]::WindowFromPoint($pt)
+    $win = if ($raw -ne [IntPtr]::Zero) { Get-WaWindowInfo $raw } else { $null }
+    $el = $null
+    try {
+        $sp = New-Object System.Windows.Point($px, $py)
+        $a = [System.Windows.Automation.AutomationElement]::FromPoint($sp)
+        if ($a) {
+            $r = $a.Current.BoundingRectangle
+            $el = [ordered]@{
+                name    = $a.Current.Name
+                type    = $a.Current.ControlType.ProgrammaticName
+                aid     = $a.Current.AutomationId
+                class   = $a.Current.ClassName
+                enabled = $a.Current.IsEnabled
+                offscreen = $a.Current.IsOffscreen
+                rect    = [ordered]@{ x = [int]$r.X; y = [int]$r.Y; w = [int]$r.Width; h = [int]$r.Height }
+            }
+        }
+    } catch { $el = [ordered]@{ error = $_.Exception.Message } }
+    [ordered]@{ point = [ordered]@{ x = $px; y = $py }; window = $win; element = $el }
+}
+
 function Out-Plan($action, $extra) {
     $fg = Get-Root ([WaInput.Native]::GetForegroundWindow())
     $obj = @{
@@ -116,13 +166,21 @@ function Out-Plan($action, $extra) {
 $desk = Get-WaDesktopInfo
 if ($desk.secured) { Fail (Get-WaBlockCode $desk) ('input desktop is not Default: ' + $desk.desktop) 3 }
 $scr = Get-WaScreen
-if (($Action -in @('move', 'click', 'dclick', 'drag', 'wheel'))) {
+if (($Action -in @('move', 'click', 'dclick', 'drag', 'wheel', 'hover'))) {
     if ($X -lt $scr.x -or $Y -lt $scr.y -or $X -ge ($scr.x + $scr.w) -or $Y -ge ($scr.y + $scr.h)) {
         Fail 'ARG_OUT_OF_SCREEN' "point ($X,$Y) outside screen $($scr.w)x$($scr.h)" 2
     }
 }
-if ($Action -in @('click', 'dclick', 'drag') -and $ExpectHwnd -le 0) {
-    Fail 'ARG_NEED_EXPECT_HWND' 'click/dclick/drag require -ExpectHwnd (S7: never click blind)' 2
+if ($Action -in @('click', 'dclick', 'drag', 'wheel', 'hover') -and $ExpectHwnd -le 0) {
+    Fail 'ARG_NEED_EXPECT_HWND' 'click/dclick/drag/wheel/hover require -ExpectHwnd (S7: never act blind)' 2
+}
+if ($Action -eq 'wheel') {
+    if ($Delta -eq 0) { Fail 'ARG_BAD_DELTA' 'wheel needs a non-zero -Delta (120 = one notch)' 2 }
+    if ($Times -lt 1 -or $Times -gt 50) { Fail 'ARG_BAD_TIMES' 'wheel -Times must be 1..50' 2 }
+}
+if ($Action -eq 'hover') {
+    if ($Dwell -lt 0 -or $Dwell -gt 10000) { Fail 'ARG_BAD_DWELL' 'hover -Dwell must be 0..10000 ms' 2 }
+    if ($Steps -lt 1 -or $Steps -gt 60) { Fail 'ARG_BAD_STEPS' 'hover -Steps must be 1..60' 2 }
 }
 
 $target = [IntPtr]::Zero
@@ -196,6 +254,49 @@ switch ($Action) {
         $p = New-Object WaInput.Native+POINT
         [WaInput.Native]::GetCursorPos([ref]$p) | Out-Null
         Out-WaJson @{ ok = $true; action = 'drag'; injected = $true; from = @{ x = $X; y = $Y }; to = @{ x = $p.X; y = $p.Y }; expected = @{ x = $X2; y = $Y2 }; target = (Get-TargetInfo $target); version = $Version }
+    }
+    'wheel' {
+        $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
+        if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
+        $flag = if ($Horizontal) { 0x1000 } else { 0x0800 }
+        if ($DryRun) {
+            Out-Plan 'wheel' @{ point = @{ x = $X; y = $Y }; delta = $Delta; times = $Times; horizontal = [bool]$Horizontal; under = (Get-PointProbe $X $Y); target = (Get-TargetInfo $target) }
+            exit 0
+        }
+        [WaInput.Native]::SetCursorPos($X, $Y) | Out-Null
+        Start-Sleep -Milliseconds 60
+        $d = $Delta
+        # a positive delta scrolls away from the user (up / left); negative scrolls toward (down / right)
+        for ($i = 0; $i -lt $Times; $i++) {
+            [WaInput.Native]::mouse_event($flag, 0, 0, $d, [UIntPtr]::Zero)
+            Start-Sleep -Milliseconds 45
+        }
+        Start-Sleep -Milliseconds 120
+        $probe = Get-PointProbe $X $Y
+        Out-WaJson @{ ok = $true; action = 'wheel'; injected = $true; point = @{ x = $X; y = $Y }; delta = $Delta; times = $Times; horizontal = [bool]$Horizontal; under = $probe; target = (Get-TargetInfo $target); version = $Version }
+    }
+    'hover' {
+        $chk = Assert-TargetPid $target $X $Y
+        if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
+        if ($DryRun) {
+            Out-Plan 'hover' @{ point = @{ x = $X; y = $Y }; steps = $Steps; dwell = $Dwell; under = (Get-PointProbe $X $Y); target = (Get-TargetInfo $target) }
+            exit 0
+        }
+        # glide in (a single teleport often does not open hover menus), then dwell, then read what is under it
+        $cur = New-Object WaInput.Native+POINT
+        [void][WaInput.Native]::GetCursorPos([ref]$cur)
+        for ($i = 1; $i -le $Steps; $i++) {
+            $ix = [int]($cur.X + ($X - $cur.X) * $i / $Steps)
+            $iy = [int]($cur.Y + ($Y - $cur.Y) * $i / $Steps)
+            [WaInput.Native]::SetCursorPos($ix, $iy) | Out-Null
+            Start-Sleep -Milliseconds 12
+        }
+        [WaInput.Native]::SetCursorPos($X, $Y) | Out-Null
+        Start-Sleep -Milliseconds $Dwell
+        $probe = Get-PointProbe $X $Y
+        $p2 = New-Object WaInput.Native+POINT
+        [void][WaInput.Native]::GetCursorPos([ref]$p2)
+        Out-WaJson @{ ok = $true; action = 'hover'; injected = $true; point = @{ x = $p2.X; y = $p2.Y }; expected = @{ x = $X; y = $Y }; steps = $Steps; dwell = $Dwell; matched = $chk.matched; under = $probe; target = (Get-TargetInfo $target); version = $Version }
     }
     'key' {
         if (-not $Combo) { Fail 'ARG_NO_COMBO' 'key needs -Combo (e.g. ctrl+s)' 2 }

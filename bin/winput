@@ -12,6 +12,10 @@ usage:
   winput click X Y [--button left|right|middle] [--count N]
   winput dclick X Y
   winput drag X1 Y1 X2 Y2 [--steps N]
+  winput wheel [X Y | --at X,Y] [--delta N] [--times N] [--horizontal]
+                              scroll at a point (default delta 120 = one notch, +away/-toward)
+  winput hover X Y [--steps N] [--dwell MS]
+                              glide to a point, dwell, then report the element under it
   winput key COMBO            (e.g. ctrl+s, alt+f4, enter, f5)
   winput type --text "..." | --text-file PATH
 Flags for all actions:
@@ -25,6 +29,7 @@ EOF
 }
 
 ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
+DELTA=120; TIMES=1; HORIZ=0; DWELL=600; AT=""
 COMBO=""; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
 
 [ $# -gt 0 ] || { WA_AUDIT_RESULT=ARG_NO_ARGS; usage >&2; exit 2; }
@@ -40,6 +45,11 @@ while [ $# -gt 0 ]; do
     --button) BUTTON="$2"; shift 2 ;;
     --count) COUNT="$2"; shift 2 ;;
     --steps) STEPS="$2"; shift 2 ;;
+    --delta) DELTA="$2"; shift 2 ;;
+    --times) TIMES="$2"; shift 2 ;;
+    --horizontal) HORIZ=1; shift ;;
+    --dwell) DWELL="$2"; shift 2 ;;
+    --at) AT="$2"; shift 2 ;;
     --expect-hwnd) HWND="$2"; shift 2 ;;
     --focus) FOCUS=1; shift ;;
     --no-restore-clip) NOCLIP=1; shift ;;
@@ -60,10 +70,24 @@ case "$ACTION" in
   drag)
     [ ${#pos[@]} -eq 4 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "drag needs X1 Y1 X2 Y2" >&2; exit 2; }
     X="${pos[0]}"; Y="${pos[1]}"; X2="${pos[2]}"; Y2="${pos[3]}" ;;
+  wheel)
+    if [ -n "$AT" ]; then
+      case "$AT" in *,*) X="${AT%%,*}"; Y="${AT#*,}" ;; *)
+        WA_AUDIT_RESULT=ARG_BAD_POS; echo "--at needs X,Y" >&2; exit 2 ;; esac
+      [ ${#pos[@]} -eq 0 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "wheel takes either X Y or --at X,Y, not both" >&2; exit 2; }
+    else
+      [ ${#pos[@]} -eq 2 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "wheel needs a point: X Y or --at X,Y" >&2; exit 2; }
+      X="${pos[0]}"; Y="${pos[1]}"
+    fi
+    case "$X$Y" in *[!0-9-]*) WA_AUDIT_RESULT=ARG_BAD_POS; echo "not a number: $X,$Y" >&2; exit 2 ;; esac ;;
+  hover)
+    [ ${#pos[@]} -eq 2 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "hover needs X Y" >&2; exit 2; }
+    X="${pos[0]}"; Y="${pos[1]}" ;;
   key)
     [ ${#pos[@]} -eq 1 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "key needs a combo like ctrl+s" >&2; exit 2; }
     COMBO="${pos[0]}" ;;
   type) : ;;
+  move|click|dclick|drag|wheel|hover|key|type) ;;
   *) WA_AUDIT_RESULT=ARG_BAD_ACTION; echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
 esac
 
@@ -83,11 +107,16 @@ fi
 
 args=(winput -Version "$VERSION" -Action "$ACTION")
 case "$ACTION" in
-  move|click|dclick) args+=(-X "$X" -Y "$Y") ;;
+  move|click|dclick|wheel|hover) args+=(-X "$X" -Y "$Y") ;;
   drag) args+=(-X "$X" -Y "$Y" -X2 "$X2" -Y2 "$Y2" -Steps "$STEPS") ;;
   key) args+=(-Combo "$COMBO") ;;
 esac
 [ "$ACTION" = "click" ] && args+=(-Button "$BUTTON" -Count "$COUNT")
+if [ "$ACTION" = "wheel" ]; then
+  args+=(-Delta "$DELTA" -Times "$TIMES")
+  [ "$HORIZ" -eq 1 ] && args+=(-Horizontal)
+fi
+[ "$ACTION" = "hover" ] && args+=(-Steps "$STEPS" -Dwell "$DWELL")
 [ "$HWND" != "0" ] && args+=(-ExpectHwnd "$HWND")
 [ "$FOCUS" -eq 1 ] && args+=(-Focus)
 [ "$NOCLIP" -eq 1 ] && args+=(-NoRestoreClip)
