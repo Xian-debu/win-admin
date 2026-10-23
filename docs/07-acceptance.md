@@ -202,7 +202,7 @@
 ### E12 · 回归不倒退
 
 - **判据**：`bash tests/check-m5.sh` 全绿（m1 17/0、m2 11/0、m3 20/0、m4 13/0）+ `scripts/check-release.sh` pass=yes + `wdiag.version == VERSION`。
-- 实测：m1 16/0 + 1 SKIP（C3）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（m5 = 回归入口，含 E5 残留断言与 E8 十轮 10/10）；`check-release.sh` pass=yes；`wdiag.version` = 1.1.0。
+- 实测：m1 16/0（skip=15：C3 最小化窗口 + 14 条「not M1」占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（m5 = 回归入口，含 E5 残留断言与 E8 十轮 10/10）；`check-release.sh` pass=yes；`wdiag.version` = 1.1.0。
 - 状态：✅ 通过（2026-10-24）
 
 ### C9 · 窗口状态可控
@@ -253,7 +253,7 @@
 | **M5 收尾** | 全表回归 + SKILL.md 与实现一致 | ✅ 2026-10-21 冻结 v1.0.0（m1 17/0、m2 11/0、m3 20/0、m4 13/0、release yes、E8 10/10；冻结后补 E5 残留断言并复跑 7/0，E8 8156–8774 ms，
   单次入口 `bash tests/check-m5.sh`；报告 `tests/reports/2026-10-21-m5.md`） |
 
-| **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0 + 1 SKIP（C3，目标窗口最小化）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 13/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
+| **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0（skip=15：C3 最小化窗口 + 14 条非本里程碑占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
 | **M9 网页语义** | 覆盖率报告（UIA 文本 / CDP innerText / 剪贴板基线） | 只出结论，不改主链路 |
 
 ## 验收记录规范

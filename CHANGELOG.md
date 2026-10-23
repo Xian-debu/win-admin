@@ -32,7 +32,7 @@
 - 夹具 `uiawnd.ps1` 存成无 BOM UTF-8，PowerShell 5.1 按 ANSI 读，中文按钮名变乱码（K39）。
 
 ### Measured
-- 夜间全表：m1 16/0 + 1 SKIP（C3，目标窗口最小化）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0。
+- 夜间全表：m1 16/0（skip=15：C3 最小化窗口 + 14 条非本里程碑占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0。
 - 网页三通道（同一页面）：CDP innerText 316 字符/0.11 s；UIA TextPattern 347 字符/1.50 s；剪贴板 353 字符/2.00 s。UIA 默认深度 10 命中率 0，depth 16 命中。
 - 单次原语仍是 600–750 ms；`ops/` 把多步压进一次调用（click-element 一次 ≈ 1.3 s）。
 - `check-release.sh` pass=yes；`dist/` 重出 tar.gz + zip + SHA256SUMS。
