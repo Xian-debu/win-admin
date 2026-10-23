@@ -16,8 +16,14 @@ usage:
                               scroll at a point (default delta 120 = one notch, +away/-toward)
   winput hover X Y [--steps N] [--dwell MS]
                               glide to a point, dwell, then report the element under it
-  winput key COMBO            (e.g. ctrl+s, alt+f4, enter, f5)
-  winput type --text "..." | --text-file PATH
+  winput key COMBO [--hold MS]  (e.g. ctrl+s, alt+f4, enter, f5) - hold keeps keys down MS ms
+  winput keydown KEY          press and KEEP DOWN one key (a, shift, f5, space)
+  winput keyup KEY            release one key pressed with keydown
+  winput releaseall           release every key left down (safety net; also --dry-run)
+  winput type --text "..." | --text-file PATH | --stdin | --text-b64 B64
+                              --stdin reads UTF-8 from standard input (quote-proof, preferred);
+                              --text-b64 takes base64 so no shell quoting applies at all.
+                              empty text is an error (ARG_EMPTY_TEXT), never a silent no-op.
 Flags for all actions:
   --yes              actually inject (default is --dry-run)
   --dry-run          only print the plan (default)
@@ -30,7 +36,9 @@ EOF
 
 ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
 DELTA=120; TIMES=1; HORIZ=0; DWELL=600; AT=""
-COMBO=""; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
+COMBO=""; HOLD=20; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
+TEXT_SET=0; B64=""; USE_STDIN=0
+HELD_FILE="$APP_ROOT/tmp/held.json"
 
 [ $# -gt 0 ] || { WA_AUDIT_RESULT=ARG_NO_ARGS; usage >&2; exit 2; }
 case "$1" in -h|--help) WA_AUDIT_RESULT=help; usage; exit 0 ;; esac
@@ -49,11 +57,14 @@ while [ $# -gt 0 ]; do
     --times) TIMES="$2"; shift 2 ;;
     --horizontal) HORIZ=1; shift ;;
     --dwell) DWELL="$2"; shift 2 ;;
+    --hold) HOLD="$2"; shift 2 ;;
     --at) AT="$2"; shift 2 ;;
     --expect-hwnd) HWND="$2"; shift 2 ;;
     --focus) FOCUS=1; shift ;;
     --no-restore-clip) NOCLIP=1; shift ;;
-    --text) TEXT="$2"; shift 2 ;;
+    --text) TEXT="$2"; TEXT_SET=1; shift 2 ;;
+    --stdin) USE_STDIN=1; shift 2 ;;
+    --text-b64) B64="$2"; shift 2 ;;
     --text-file) TF="$2"; shift 2 ;;
     -*) WA_AUDIT_RESULT=ARG_UNKNOWN_FLAG; echo "unknown flag: $1" >&2; exit 2 ;;
     *) pos+=("$1"); shift ;;
@@ -86,14 +97,46 @@ case "$ACTION" in
   key)
     [ ${#pos[@]} -eq 1 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "key needs a combo like ctrl+s" >&2; exit 2; }
     COMBO="${pos[0]}" ;;
+  keydown|keyup)
+    [ ${#pos[@]} -eq 1 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "$ACTION needs one key name" >&2; exit 2; }
+    COMBO="${pos[0]}" ;;
+  releaseall)
+    [ ${#pos[@]} -eq 0 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "releaseall takes no arguments" >&2; exit 2; } ;;
   type) : ;;
-  move|click|dclick|drag|wheel|hover|key|type) ;;
+  move|click|dclick|drag|wheel|hover|key|keydown|keyup|releaseall|type) ;;
   *) WA_AUDIT_RESULT=ARG_BAD_ACTION; echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
 esac
 
-if [ "$ACTION" = "type" ] && [ -z "$TEXT" ] && [ -z "$TF" ]; then
-  WA_AUDIT_RESULT=ARG_NEED_TEXT; echo "type needs --text or --text-file" >&2; exit 2
-fi
+case "$ACTION" in
+  type)
+    srcs=0
+    [ "$TEXT_SET" -eq 1 ] && srcs=$((srcs+1))
+    [ -n "$TF" ] && srcs=$((srcs+1))
+    [ "$USE_STDIN" -eq 1 ] && srcs=$((srcs+1))
+    [ -n "$B64" ] && srcs=$((srcs+1))
+    if [ "$srcs" -eq 0 ]; then
+      WA_AUDIT_RESULT=ARG_NEED_TEXT; echo "type needs --text, --text-file, --stdin or --text-b64" >&2; exit 2
+    fi
+    if [ "$srcs" -gt 1 ]; then
+      WA_AUDIT_RESULT=ARG_TOO_MANY_TEXT; echo "--text/--text-file/--stdin/--text-b64 are mutually exclusive" >&2; exit 2
+    fi
+    if [ "$B64" != "" ]; then
+      if ! printf '%s' "$B64" | base64 -d > "$APP_ROOT/tmp/b64-$.txt" 2>/dev/null; then
+        WA_AUDIT_RESULT=ARG_BAD_B64; echo "--text-b64 is not valid base64" >&2; exit 2
+      fi
+      TF="$APP_ROOT/tmp/b64-$.txt"
+    elif [ "$USE_STDIN" -eq 1 ]; then
+      mkdir -p "$APP_ROOT/tmp"
+      TF="$APP_ROOT/tmp/stdin-$.txt"
+      cat > "$TF"
+    fi
+    if [ -n "$TF" ] && [ ! -s "$TF" ]; then
+      WA_AUDIT_RESULT=ARG_EMPTY_TEXT; echo "refusing to type empty text (ARG_EMPTY_TEXT)" >&2; exit 2
+    fi
+    if [ "$TEXT_SET" -eq 1 ] && [ -z "$TEXT" ]; then
+      WA_AUDIT_RESULT=ARG_EMPTY_TEXT; echo "refusing to type empty text (ARG_EMPTY_TEXT)" >&2; exit 2
+    fi ;;
+esac
 
 # S1/S2: real injection must pass the guard; dry-run never touches the desktop, but logging it is M3.
 if [ "$REAL" -eq 1 ]; then
@@ -109,8 +152,10 @@ args=(winput -Version "$VERSION" -Action "$ACTION")
 case "$ACTION" in
   move|click|dclick|wheel|hover) args+=(-X "$X" -Y "$Y") ;;
   drag) args+=(-X "$X" -Y "$Y" -X2 "$X2" -Y2 "$Y2" -Steps "$STEPS") ;;
-  key) args+=(-Combo "$COMBO") ;;
+  key) args+=(-Combo "$COMBO" -Hold "$HOLD") ;;
+  keydown|keyup) args+=(-VkName "$COMBO") ;;
 esac
+args+=(-HeldFile "$(wa_winpath "$HELD_FILE")")
 [ "$ACTION" = "click" ] && args+=(-Button "$BUTTON" -Count "$COUNT")
 if [ "$ACTION" = "wheel" ]; then
   args+=(-Delta "$DELTA" -Times "$TIMES")
@@ -124,9 +169,9 @@ fi
 
 typef=""
 if [ "$ACTION" = "type" ]; then
-  if [ -z "$TF" ]; then
+  if [ "$TEXT_SET" -eq 1 ]; then
     mkdir -p "$APP_ROOT/tmp"
-    TF="$APP_ROOT/tmp/type-$$.txt"
+    TF="$APP_ROOT/tmp/type-$.txt"
     typef="$TF"
     printf '%s' "$TEXT" > "$TF"
   fi
@@ -135,6 +180,11 @@ fi
 
 raw="$(wa_run "${args[@]}")"
 [ -n "$typef" ] && rm -f "$typef"
+
+# S9: never leave keys stuck - warn (and on failure, release) when something is still held.
+if [ -f "$HELD_FILE" ] && [ "$ACTION" != "keydown" ]; then
+  echo "winput: WARNING keys still held (see '$HELD_FILE'); run 'winput releaseall --yes'" >&2
+fi
 
 j="$(wa_json_of "$raw")"
 if [ -z "$j" ]; then

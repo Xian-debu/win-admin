@@ -12,6 +12,9 @@ param(
     [switch]$Horizontal,
     [int]$Dwell = 600,
     [string]$Combo = '',
+    [string]$VkName = '',
+    [int]$Hold = 20,
+    [string]$HeldFile = '',
     [string]$TextFile = '',
     [long]$ExpectHwnd = 0,
     [switch]$DryRun,
@@ -71,6 +74,22 @@ function Get-Vk([string]$name) {
 function Get-Root([IntPtr]$h) {
     if ($h -eq [IntPtr]::Zero) { return [IntPtr]::Zero }
     return [WaInput.Native]::GetAncestor($h, 2)
+}
+
+function Read-Held {
+    if (-not $HeldFile -or -not (Test-Path $HeldFile)) { return @() }
+    try { $a = Get-Content -Raw -Path $HeldFile | ConvertFrom-Json } catch { return @() }
+    if ($null -eq $a) { return @() }
+    return @($a)
+}
+
+function Write-Held([int[]]$vks) {
+    if (-not $HeldFile) { return }
+    $dir = Split-Path -Parent $HeldFile
+    if ($dir -and -not (Test-Path $dir)) { New-Item -ItemType Directory -Force -Path $dir | Out-Null }
+    if (-not $vks -or $vks.Count -eq 0) { Remove-Item -Force -Path $HeldFile -ErrorAction SilentlyContinue; return }
+    $txt = ConvertTo-Json -InputObject @($vks) -Compress
+    [IO.File]::WriteAllText($HeldFile, $txt, (New-Object Text.UTF8Encoding($false)))
 }
 
 function Get-TargetInfo([IntPtr]$h) {
@@ -300,9 +319,7 @@ switch ($Action) {
     }
     'key' {
         if (-not $Combo) { Fail 'ARG_NO_COMBO' 'key needs -Combo (e.g. ctrl+s)' 2 }
-        $chk = Assert-Target $target 0 0 $false ([bool]$Focus)
-        if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
-        if ($DryRun) { Out-Plan 'key' @{ combo = $Combo }; exit 0 }
+        if ($Hold -lt 0 -or $Hold -gt 10000) { Fail 'ARG_BAD_HOLD' "hold out of range: $Hold" 2 }
         $parts = $Combo.ToLower() -split '\+'
         $vks = @()
         foreach ($p in $parts) {
@@ -310,9 +327,45 @@ switch ($Action) {
             if ($vk -lt 0) { Fail 'ARG_BAD_KEY' "unknown key: $p" 2 }
             $vks += $vk
         }
+        $chk = Assert-Target $target 0 0 $false ([bool]$Focus)
+        if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
+        if ($DryRun) { Out-Plan 'key' @{ combo = $Combo; vks = $vks; hold = $Hold; target = (Get-TargetInfo $target) }; exit 0 }
         foreach ($vk in $vks) { [WaInput.Native]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 20 }
+        Start-Sleep -Milliseconds $Hold
         for ($i = $vks.Count - 1; $i -ge 0; $i--) { [WaInput.Native]::keybd_event([byte]$vks[$i], 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 20 }
-        Out-WaJson @{ ok = $true; action = 'key'; injected = $true; combo = $Combo; vks = $vks; target = (Get-TargetInfo $target); version = $Version }
+        Out-WaJson @{ ok = $true; action = 'key'; injected = $true; combo = $Combo; vks = $vks; hold = $Hold; target = (Get-TargetInfo $target); version = $Version }
+    }
+    'keydown' {
+        if (-not $VkName) { Fail 'ARG_NO_VK' 'keydown needs a key name (e.g. a, shift, f5)' 2 }
+        if ($VkName -match '\+') { Fail 'ARG_BAD_KEY' "keydown takes one key; use 'key $VkName' for combos" 2 }
+        $vk = Get-Vk $VkName
+        if ($vk -lt 0) { Fail 'ARG_BAD_KEY' "unknown key: $VkName" 2 }
+        $chk = Assert-Target $target 0 0 $false ([bool]$Focus)
+        if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
+        $held = @(Read-Held)
+        if ($DryRun) { Out-Plan 'keydown' @{ vk = $vk; key = $VkName; held = $held; target = (Get-TargetInfo $target) }; exit 0 }
+        [WaInput.Native]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero)
+        if (-not ($held -contains $vk)) { $held += $vk }
+        Write-Held $held
+        Out-WaJson @{ ok = $true; action = 'keydown'; injected = $true; vk = $vk; key = $VkName; held = $held; target = (Get-TargetInfo $target); version = $Version }
+    }
+    'keyup' {
+        if (-not $VkName) { Fail 'ARG_NO_VK' 'keyup needs a key name (e.g. a, shift, f5)' 2 }
+        if ($VkName -match '\+') { Fail 'ARG_BAD_KEY' "keyup takes one key; use 'key $VkName' for combos" 2 }
+        $vk = Get-Vk $VkName
+        if ($vk -lt 0) { Fail 'ARG_BAD_KEY' "unknown key: $VkName" 2 }
+        if ($DryRun) { Out-Plan 'keyup' @{ vk = $vk; key = $VkName; held = @(Read-Held) }; exit 0 }
+        [WaInput.Native]::keybd_event([byte]$vk, 0, 2, [UIntPtr]::Zero)
+        $held = @(Read-Held | Where-Object { [int]$_ -ne $vk })
+        Write-Held $held
+        Out-WaJson @{ ok = $true; action = 'keyup'; injected = $true; vk = $vk; key = $VkName; held = $held; version = $Version }
+    }
+    'releaseall' {
+        $held = @(Read-Held)
+        if ($DryRun) { Out-Plan 'releaseall' @{ held = $held }; exit 0 }
+        foreach ($h in $held) { [WaInput.Native]::keybd_event([byte][int]$h, 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 20 }
+        Write-Held @()
+        Out-WaJson @{ ok = $true; action = 'releaseall'; injected = ($held.Count -gt 0); released = $held; held = @(); version = $Version }
     }
     'type' {
         if (-not $TextFile) { Fail 'ARG_NO_TEXT_FILE' 'type needs -TextFile (UTF-8)' 2 }
