@@ -157,6 +157,21 @@ IME 吃键 → 一律走剪贴板，不做逐字 `SendKeys`。
 3. `git tag vX.Y.Z` + Release 附 `dist/` 产物与复演记录。
 4. 迁移说明：换机器时只需 P1 + `bootstrap.sh`；P2 由脚本部署，不入库、不进备份。
 
+
+## M8 · v1.1.0 原语补齐（进行中，源自 `docs/16` 取证）
+
+- 触发：v1.0.0 冻结后三次真实任务（淘宝购物车、B 站投稿、mascot 桌宠）暴露的不是 bug 而是**能力缺口**。
+- 计划：`docs/17-v2-plan.md` T1–T10；判据：`docs/07` E9–E12 / C9–C13 / S9。
+- 顺序：wwin 状态 → winput（hover/wheel/hold/type --stdin）→ wuia（find/act）→ ops（click-element/wait-uia/hover-menu）→ wshot（rect/hwnd/grid）→ 文档/发布。
+- 出口：`VERSION=1.1.0`、`check-m6.sh` 全绿并并入总回归、SKILL.md 与实现一致、dist 重出。
+
+## M9 · 网页语义通道（研究 → v1.2.0 决策）
+
+- 问题：网页正文/控件只能靠剪贴板循环（淘宝 25 轮）或截图目测；`ctrl+u` 空壳、DevTools 打不进字、CDP 端口未监听。
+- 本轮只做实验与结论：`docs/18-web-semantics-spike.md`（Edge 无障碍树覆盖率 / 受管 CDP 读数覆盖率 / 剪贴板循环基线）。
+- 红线：不重启用户 Edge、不改其启动参数、不读 cookie 与登录凭据；受管实例只经 cdp-hub 启动。
+- 出口：给出"读数覆盖率"量化与 v1.2.0 二选一建议（AX 树增强 vs CDP 桥）。
+
 ## 依赖关系
 
 ```
