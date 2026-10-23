@@ -112,7 +112,11 @@ say "C3 UIA rect vs window rect (<=2px)"
 if [ -n "$hx" ]; then
   rect_uia="$(bash "$REPO_DIR/bin/wuia" --hwnd "$hx" --depth 0 | jq -r '.nodes[0].rect | [.x,.y,.w,.h] | map(tostring) | join(" ")')"
   rect_win="$(bash "$REPO_DIR/bin/wwin" list | jq -r --arg hx "$hx" '.windows[] | select(.hwnd==$hx) | [.rect.x,.rect.y,.rect.w,.rect.h] | map(tostring) | join(" ")' | head -1)"
-  if [ -n "$rect_win" ]; then
+  if printf '%s' "$rect_uia" | grep -q null; then
+    # A minimized window gets (-32000,-32000) from GetWindowRect and a NULL BoundingRectangle
+    # from UIA: there is no rect to compare, so this is not a failure (K36).
+    sk C3 "target window is minimized (UIA rect null) - no geometry to compare"
+  elif [ -n "$rect_win" ]; then
     read -r ux uy uw uh <<< "$rect_uia"
     read -r wx wy ww wh <<< "$rect_win"
     dx=$(( ux>wx ? ux-wx : wx-ux )); dy=$(( uy>wy ? uy-wy : wy-uy ))
