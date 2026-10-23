@@ -4,7 +4,9 @@ param(
     [int]$X = -999999,
     [int]$Y = -999999,
     [int]$W = 0,
-    [int]$H = 0
+    [int]$H = 0,
+    [long]$Hwnd = 0,
+    [int]$Grid = 0
 )
 $env:WA_VERSION = if ($env:WA_VERSION) { $env:WA_VERSION } else { 'unknown' }
 if (-not $Core) { $Core = Join-Path $PSScriptRoot 'lib/wa-core.ps1' }
@@ -18,6 +20,15 @@ try {
         exit 3
     }
     $screen = Get-WaScreen
+    # T9: -Hwnd shoots exactly the window rect. bin/wshot rejects --hwnd together with --rect,
+    # so there is exactly one source for the geometry here.
+    if ($Hwnd -ne 0) {
+        $ws = Get-WaWindowState $Hwnd
+        if (-not $ws) { Write-WaFail 'ENV_NO_WINDOW' ("not a window handle: " + $Hwnd); exit 3 }
+        $r = $ws.rect
+        if ($r.w -le 0 -or $r.h -le 0) { Write-WaFail 'ENV_NO_WINDOW' ("window has no drawable area: " + $Hwnd); exit 3 }
+        $X = $r.x; $Y = $r.y; $W = $r.w; $H = $r.h
+    }
     if ($X -eq -999999) { $X = $screen.x }
     if ($Y -eq -999999) { $Y = $screen.y }
     if ($W -le 0) { $W = $screen.w }
@@ -37,15 +48,44 @@ try {
     $bmp = New-Object System.Drawing.Bitmap $W, $H
     $g = [System.Drawing.Graphics]::FromImage($bmp)
     $g.CopyFromScreen($X, $Y, 0, 0, (New-Object System.Drawing.Size $W, $H))
+    # T9: -Grid N draws a ruler over the pixels. Lines land on multiples of N in *screen*
+    # coordinates and each line is labelled with that absolute coordinate, so a reader can map
+    # image pixels back to click coordinates without arithmetic.
+    if ($Grid -gt 0) {
+        $penMinor = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(90, 255, 0, 0)), 1
+        $penMajor = New-Object System.Drawing.Pen ([System.Drawing.Color]::FromArgb(160, 255, 0, 0)), 1
+        $font = New-Object System.Drawing.Font 'Consolas', 8
+        $brush = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(220, 255, 40, 40))
+        $sx = $X - ($X % $Grid); if ($sx -lt $X) { $sx += $Grid }
+        for ($gx = $sx; $gx -le ($X + $W - 1); $gx += $Grid) {
+            $lx = $gx - $X
+            if (($gx % ($Grid * 5)) -eq 0) { $pen = $penMajor } else { $pen = $penMinor }
+            $g.DrawLine($pen, $lx, 0, $lx, $H - 1)
+            $g.DrawString([string]$gx, $font, $brush, [float]($lx + 2), [float]2)
+        }
+        $sy = $Y - ($Y % $Grid); if ($sy -lt $Y) { $sy += $Grid }
+        for ($gy = $sy; $gy -le ($Y + $H - 1); $gy += $Grid) {
+            $ly = $gy - $Y
+            if (($gy % ($Grid * 5)) -eq 0) { $pen = $penMajor } else { $pen = $penMinor }
+            $g.DrawLine($pen, 0, $ly, $W - 1, $ly)
+            $g.DrawString([string]$gy, $font, $brush, [float]2, [float]($ly + 1))
+        }
+        $penMinor.Dispose(); $penMajor.Dispose(); $font.Dispose(); $brush.Dispose()
+    }
     $g.Dispose()
     $bmp.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
     $len = (Get-Item $Out).Length
+    $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $Out).Hash.ToLower()
+    $hwndS = if ($Hwnd -ne 0) { '0x{0:x}' -f $Hwnd } else { '' }
     Out-WaJson ([ordered]@{
         ok      = $true
         path    = $Out
         x       = $X; y = $Y; w = $W; h = $H
         bytes   = $len
+        sha256  = $sha
+        grid    = $Grid
+        hwnd    = $hwndS
         screen  = $screen
         dpiMode = $dpiMode
         at      = (Get-Date).ToUniversalTime().ToString('o')

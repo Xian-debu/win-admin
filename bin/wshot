@@ -3,25 +3,39 @@
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
-OUT=""; RECT=""
+OUT=""; RECT=""; HWND=""; GRID=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)
       cat <<'EOF'
-usage: wshot [--out PATH.png] [--rect X,Y,W,H]
+usage: wshot [--out PATH.png] [--rect X,Y,W,H | --hwnd H] [--grid N]
   Default: full virtual screen into C:/Users/Public/win-admin/shots/.
   Prints one JSON object: path (Windows), wsl_path, x,y,w,h, bytes, screen.
+  --hwnd H   shoot exactly that window's rect (mutually exclusive with --rect)
+  --grid N   overlay a ruler every N px, labelled with absolute screen coordinates
   exit 0 ok | 2 ARG_OUT_OF_SCREEN | 3 ENV_SECURE_DESKTOP | 5 exec failure
 EOF
       exit 0 ;;
     --out) OUT="$2"; shift 2 ;;
     --rect) RECT="$2"; shift 2 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --grid) GRID="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; exit 2 ;;
   esac
 done
 
+if [ -n "$HWND" ] && [ -n "$RECT" ]; then
+  echo "--hwnd and --rect are mutually exclusive" >&2; exit 2
+fi
+case "$GRID" in *[!0-9]*) echo "--grid must be a positive integer" >&2; exit 2 ;; esac
+if [ -n "$HWND" ]; then
+  case "$HWND" in 0x*|0X*) ;; *[!0-9]*) echo "--hwnd must be a decimal or 0x handle" >&2; exit 2 ;; esac
+fi
+
 args=(wshot -Version "$VERSION")
 if [ -n "$OUT" ]; then args+=(-Out "$(wa_winpath "$OUT")"); fi
+if [ -n "$HWND" ]; then args+=(-Hwnd "$((HWND))"); fi
+if [ "$GRID" -gt 0 ]; then args+=(-Grid "$GRID"); fi
 if [ -n "$RECT" ]; then
   IFS=, read -r rx ry rw rh <<< "$RECT"
   args+=(-X "$rx" -Y "$ry" -W "$rw" -H "$rh")
