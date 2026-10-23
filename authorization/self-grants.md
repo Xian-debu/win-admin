@@ -3,6 +3,32 @@
 > 协议见 `docs/12-authorization.md`。每行 = 一次"我替用户做的决定"。
 > 只看这一张表就能判断夜间作业的风险面；细节在对应提交与报告里。
 
+## 2026-10-24 夜间批次（v1.1.0）一览
+
+> 用户 m00002 睡前授权：「有自己想法的，我全部授权给你了，你只需在 git 提交时单独增量提交一个自授权清单即可，明早我一并查看」。
+> 本批 SG-0016 … SG-0034 共 19 条，按「风险从高到低」读：
+
+**改变能力面（会动到用户桌面）**
+- SG-0018 `wwin set` 归入 input 类（需 grant），不新设 scope。
+- SG-0019 `ops/click-element` 对「删除/购买/支付/提交/下单/格式化」类名字默认拒绝，`--allow-danger` 才动手。
+- SG-0020 `winput hover` 返回落点 UIA 元素（让「悬停生效」可判定）。
+- SG-0030 `click-element`/`wait-uia` 默认深度失手自动加深（网页内容在 depth 12–13），输出标 `deepened`。
+
+**改测试判据（影响「什么算通过」）**
+- SG-0025 C10 判据 → 「元素矩形包含悬停点（±2 px）」；SG-0026 `check-release` UTF-8 窗口 20→40 行；SG-0027 `build-release` 改 `ls-files -z` + `tar --null`（修中文路径漏打包）；SG-0033 新增 m11 N27；SG-0034 套件串行跑。
+- SG-0021→SG-0024 夹具由 WinForms 改 WPF（TextBlock 无 TextPattern，WinForms 验不了 `set-value` 回读）。
+
+**范围与取舍（决定「不做」什么）**
+- SG-0016 夜间自主推进 T1–T11；SG-0017 新增 docs/16、docs/17、`scripts/scan-sessions.py`。
+- SG-0022 网页实验只起 cdp-hub 的**受管一次性** Edge，不碰用户真实浏览器。
+- SG-0031 网页通道定为 **UIA-first**（TextPattern 读正文、Invoke/SetValue 点元素）；CDP 仅用于自起实例——用户真实 Edge 没开调试端口，重启它属红线。
+- SG-0023 本轮不改 docs 编号冲突（`12-authorization.md` 与 `12-retro.md`）。
+
+**补充**
+- SG-0028 T3+T4 合并提交（同一份 `bin/winput`，拆开会留下跑不起来的中间态）。
+- SG-0029 冻结并打 `v1.1.0` 标签 + 推送 GitHub。
+- SG-0032 夹具 `web11.html` 入库（1.7 KB 静态页，无凭据）。
+
 | ID | 时间 | 类别 | 决定 | 依据 | 影响面 | 回滚 | 提交 |
 |---|---|---|---|---|---|---|---|
 | SG-0001 | 2026-10-21T01:05+08:00 | SCOPE | 夜间自主推进 M3→M4→M5，遇到岔路自己定，不阻塞等用户 | 用户 m00805 全权授权 | 项目进度与设计选择 | 逐条回滚；用户可对任一 SG 喊停 | 本提交 |
