@@ -12,11 +12,17 @@ cd "$REPO" || exit 1
 rm -rf "$DIST"
 mkdir -p "$DIST"
 
-mapfile -t FILES < <(git ls-files | grep -v -E '^(dist/|tests/reports/tmp)' )
+# K45: git quotes non-ASCII paths (C-style) unless core.quotepath=false; tar cannot stat those
+# quoted names. Read NUL-separated names instead of word-splitting quoted output.
+mapfile -d '' -t FILES < <(git -c core.quotepath=false ls-files -z | grep -zv -E '^(dist/|tests/reports/tmp)' )
 [ "${#FILES[@]}" -gt 0 ] || { echo "no tracked files" >&2; exit 1; }
 
-tar --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
-    -czf "$DIST/win-admin-$V.tar.gz" -- "${FILES[@]}" || exit 1
+LIST="$(mktemp)"
+trap 'rm -f "$LIST"' EXIT
+printf '%s\0' "${FILES[@]}" > "$LIST"
+
+tar --null --no-recursion --sort=name --mtime="@$EPOCH" --owner=0 --group=0 --numeric-owner \
+    -czf "$DIST/win-admin-$V.tar.gz" -T "$LIST" || exit 1
 
 python3 - "$REPO" "$V" "$EPOCH" "$DIST" <<'PY'
 import os, sys, zipfile

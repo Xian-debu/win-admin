@@ -42,13 +42,13 @@ L1 命令与系统  ← 我能跑程序、查状态
 |---|---|---|---|---|
 | 枚举窗口（含标题/坐标/进程） | ✅ | `wwin list` 14 窗口 712–743 ms，8 个中文标题完整（K1 已修） | — | M1 ✅ 2026-10-21 |
 | 读取控件树（语义定位） | ✅ | `wuia --title Notepad --depth 2` 9 节点 0.5 s；rect 与 `GetWindowRect` 偏差 0,0,0,0 | 默认 `--depth 3` + 400 节点上限防刷屏 | M1 ✅ 2026-10-21 |
-| 窗口激活 / 最大化 / 移动 | ✅ | `winput --focus`：`ShowWindow(9)+SetForegroundWindow` 后再校验前台窗口，10/10 成功；未抢到时 exit 3 `ENV_NOT_FOREGROUND`（不硬打） | 系统前台锁仍可能拒绝（已降级为显式报错） | M2 ✅ 2026-10-21 |
+| 窗口激活 / 最大化 / 移动 | ✅ | v1.0：`winput --focus` 10/10；**v1.1**：`wwin state`/`wwin set` 用 `GetWindowPlacement` 判最大化、`SetWindowPos` 移动缩放、回读 `before/after`，m6 N1–N10 全绿 | 系统前台锁仍可能拒绝（已降级为显式报错） | M2 ✅ / M8 ✅ 2026-10-24 |
 | 鼠标移动 / 单击 / 双击 | ✅ | 10/10 次点击全部命中：命令 ok 10/10 且窗口侧计数器 10/10；`SetCursorPos` 后回读坐标一致 | — | M2 ✅ 2026-10-21 |
 | 鼠标拖拽 | ✅ | 拖 (300,150) px，窗口 rect 位移恰为 (300,150)，误差 (0,0) px；步进 `SetCursorPos`+15 ms 间隔，起终点都校验根窗口 | — | M2 ✅ 2026-10-21 |
 | 键盘单键 / 组合键 | ✅ | `winput key ctrl+v` 路径已在 C5 中实测生效；`Get-Vk` 映射字母/数字/F1–F24/方向/修饰键 | IME 候选窗未覆盖 | M2 ✅ 2026-10-21 |
 | 中文输入 | ✅ | `Hello 世界 — 中文输入 ✅ line2` 经剪贴板 + `Ctrl+V` 粘贴，`wuia --value` 回读逐字节一致，测试窗落盘文本亦一致 | 仅 WPF TextBox 验证；部分应用拒收粘贴（M4 复合操作里再遇） | M2 ✅ 2026-10-21 |
 | 等待窗口出现（轮询） | ✅ | `wwait` 100 ms 轮询：目标出现后 47 ms 内返回（要求 ≤200 ms）；超时 exit 3 `ENV_WAIT_TIMEOUT` | 只等"窗口出现"，不等"内容变化"（M4 需要时加谓词） | M2 ✅ 2026-10-21 |
-| 语义点击（找到控件直接 Invoke） | 🧪 | UIA `InvokePattern` 仍未测；当前点击一律坐标 + 目标校验 | 需要 `wuia` 输出 aid 后按 aid 定位 | M4 |
+| 语义点击（找到控件直接 Invoke） | ✅ | v1.1：`wuia --find-* + --invoke/--select/--toggle/--expand/--set-value`，每次动作返回回读状态；`ops/click-element` 优先 Invoke（不移动光标、遮挡可用），m10 17/0、m11 13/0 | Chromium 的部分自定义控件不暴露 Pattern，回落坐标点击 | M8 ✅ 2026-10-24 |
 | 锁屏 / 断开检测 | ✅ | `Get-WaDesktopInfo` 用 `OpenInputDesktop`+`GetUserObjectInformation`（实测 `secured:false, desktop:"Default"`）；S3 用**只能更严格**的文件钩子断言 → `winput` exit 3 `SESSION_LOCKED`（SG-0002） | 真实锁屏不可自测（红线：无法解锁） | M3 ✅ 2026-10-21 |
 | UAC / 安全桌面拒绝 | ✅ | 同一检测路径，桌面名命中 `Winlogon|Secure` → exit 3 `UAC_SECURE_DESKTOP`；`wshot` 同样拒绝 | 拒绝码映射依赖桌面名，新版本 Windows 需回归（K21） | M3 ✅ 2026-10-21 |
 | 无授权不点 | ✅ | 无/过期/撤销/scope 不含 → exit 4；S1 目标按钮区域像素 diff = 0（真的没动） | — | M3 ✅ 2026-10-21 |
@@ -119,3 +119,32 @@ L3 的"看得懂"已验收（C2/C3，hwnd 与 rect 精确对齐）；L3 的"点�
 - 遮挡必须先激活：`winput` 的 S7 断言不允许点击"看起来在那儿但顶层不是它"的点。
 - UIA 树巨大的应用（浏览器）默认 depth 8 / max 2000，深层控件要显式加深并接受更慢。
 - 复合操作全部默认 dry-run，`--yes` 才注入；全部过 guard，全部写审计。
+## 8. v1.1 语义层（2026-10-24 实测，M8）
+
+v1.0 的四条绕路（窗口最大化写 PowerShell、悬停菜单靠坐标猜、滚轮/长按缺失、引号截断导致输入静默失败）
+在 v1.1 全部变成一条命令。逐项证据见 `tests/reports/2026-10-24-m8.md`。
+
+| 能力 | 状态 | 实测 | 测试 |
+|---|---|---|---|
+| 窗口状态 `wwin state/set` | ✅ | max→showCmd=3；restore 精确回原 rect；move 偏差 0 px；topmost 往返一致 | m6 N1–N10 |
+| 悬停可判定 `winput hover` | ✅ | 返回落点元素，且 element.rect 包含悬停点（±2 px） | m7 N1–N3 |
+| 滚轮 `winput wheel` | ✅ | 垂直/水平滚动后 ScrollPattern 读回位置变化 | m7 N4–N6 |
+| 键盘长按/成对 `key --hold` `keydown/keyup/releaseall` | ✅ | held.json 记录按下集合，releaseall 后清空；故意不释放会告警 | m8 K1–K7 |
+| 免引号输入 `type --stdin/--text-b64` | ✅ | 敌意文本 41 字节逐字节一致；空文本 rc=2 | m9 L1–L7 |
+| UIA 语义查找 `wuia --find-*` | ✅ | 按 name/type/aid/class/enabled/on-screen/index 定位；`--point` 返回元素与祖先链 | m10 F1–F8 |
+| 元素动作 `wuia --invoke/--select/--toggle/--expand/--set-value/--get-text` | ✅ | 动作后回读：计数 +1、选中项、ToggleState、Expanded、回读值与写入一致 | m10 A1–A11 |
+| 复合：`click-element` / `wait-uia` / `hover-menu` | ✅ | 语义动作 + 必备校验；谓词等待 660 ms 命中；hover 菜单点到二级项 | m11 N15–N26 |
+| 截图辅助 `wshot --hwnd/--grid` | ✅ | 窗口矩形精确一致；网格只改线附近像素（diff 2.7%），格心不变；sha256 与文件一致 | m12 N24–N29 |
+| 危险名默认拒绝（S9） | ✅ | 名字含「删除」的节点 rc=3 `ENV_DANGEROUS_ACTION`，`--allow-danger` 才动手 | m11 N24/N24b |
+| 网页整页正文（UIA TextPattern） | ✅ | `--find-aid RootWebArea --get-text` 347 字符，含 input/textarea 当前值，剔除 display:none（`docs/18`） | 手工实测（spike） |
+| 网页内元素读写点 | ✅ | 页面按钮 depth 13、`patterns:["Invoke"]`；点后标题变化可判定；`--set-value` 经 CDP 交叉验证为真 DOM 值 | 手工实测（spike） |
+| 网页深层自动加深 | ✅ | 网页内容在 depth 12–13，默认 depth 10 会误报找不到；`click-element`/`wait-uia` 首次落空自动加深一次并标 `deepened` | m11 N27 |
+
+新增硬限制（实测得出，不是猜测）：
+
+- 最大化窗口的 `GetWindowRect` 是 `-11,-11` 的越界边框，**几何判不出最大化**，必须读 `showCmd`（K43 记入 docs/11）。
+- WPF `TextBlock` 不暴露 TextPattern，`--get-text` 回落 `Name`（K38）。
+- 含中文的 `.ps1` 必须 **UTF-8 with BOM**，否则 PS 5.1 按 ANSI 读、中文变乱码（K39）。
+- Chromium 的二级 hover 菜单不保证进 UIA 树：`hover-menu` 失败即 `ENV_MENU_NOT_SHOWN`，此时只选一级项并在交付报告写明。
+- Chromium 的 a11y 树是**异步**长出来的：刚出窗口时只有 chrome（279 节点/707 名字字符），稍后才是 318 节点/1051 字符且含页面内容——读网页要用 `ops/wait-uia` 轮询，别一次性 find（`docs/18`）。
+- 读网页正文**不需要 CDP**：CDP 只快 13 倍（0.11 s vs 1.50 s），但要求调试端口，而用户真实 Edge 没开——重启它属红线。CDP 只用于 cdp-hub 自起的受管一次性实例。

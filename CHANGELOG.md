@@ -3,6 +3,40 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [1.1.0] - 2026-10-24
+
+主题：**把 v1.0.0 的绕路变成一条命令**。依据三份真实会话取证（`docs/16`），逐条对照实施（`docs/17`）：T1–T9 落地，T10 文档/契约/发布，T11 网页语义实验见 `docs/18`。
+
+### Added
+- `wwin state` / `wwin set`：窗口状态可控（max/restore/min/normal、移动缩放、topmost），判据是回读的 `GetWindowPlacement`（最大化窗口的 `GetWindowRect` 是负偏移，几何判不出来），输出 `before/after` 两份实测状态；不符即 `ENV_STATE_UNCHANGED` rc=3。
+- `winput hover X Y [--dwell MS]`：分段移动 + 驻留，返回**落点元素**（UIA `ElementFromPoint`），让「浮层出没出来」可判定；`winput wheel`（垂直/水平）、`winput key --hold`、`keydown/keyup/releaseall` 与 `held.json` 未释放检测。
+- `winput type --stdin` / `--text-b64` / `--text-file`：彻底免引号；空文本报 `ARG_EMPTY_TEXT` rc=2（v1.0 是静默失败）。
+- `wuia` 语义层：`--find-name/--find-type/--find-aid/--find-class/--enabled/--on-screen/--index/--limit`，`--point X,Y` 问「光标下是什么」，动作 `--invoke/--select/--toggle/--expand/--collapse/--focus/--get-value/--get-text/--set-value`，每个动作返回**动作后的回读状态**；禁用元素 `ENV_DISABLED`，缺 Pattern `ENV_NO_PATTERN`。
+- `ops/click-element`（语义动作 + 必备校验 + invoke/click 双策略）、`ops/wait-uia`（谓词等待）、`ops/hover-menu`（悬停展开 → 按 UIA 名字点二级项，失败 `ENV_MENU_NOT_SHOWN`）。
+- `wshot --hwnd H`（窗口矩形截图）、`--grid N`（标尺网格 + 绝对坐标刻字）、JSON 增 `sha256`。
+- 新夹具：`tests/helpers/menutwin.ps1`（hover 才显形菜单）、`tests/helpers/uiawnd.ps1`（UIA 控件窗，含计数按钮、内容自变的 CYCLE 按钮、禁用按钮、危险名按钮「删除」、下拉、列表）、`tests/helpers/imgcmp.ps1`。
+- 验收：`check-m6.sh`（窗口状态 N1–N10）、`check-m7.sh`（悬停/滚轮）、`check-m8.sh`（键盘长按/held）、`check-m9.sh`（免引号输入）、`check-m10.sh`（UIA find/act 17 项）、`check-m11.sh`（ops 13 项）、`check-m12.sh`（截图 hwnd/grid/sha 11 项）。判据 E9–E12 / C9–C13 / S9 追加进 `docs/07`。
+
+### Changed
+- `ops/click-element` 对名字含 `删除|购买|提交|支付|下单|格式化|reset` 的节点**默认拒绝**（`ENV_DANGEROUS_ACTION` rc=3），`--allow-danger` 才动手；禁用/离屏元素报 `ENV_ELEMENT_NOT_ACTIONABLE`（不再混进「找不到」）。
+- `ops/click-element` / `ops/wait-uia` 默认深度失手时**自动加深一次**（10/3000 → 16/8000）并在 JSON 标 `deepened`：网页内容在 a11y 树 depth 12–13，旧默认值会把「搜得不够深」误报成「页面里没有」。`wait-uia --gone` 同样受益（浅搜「看不见」不再被当成「已消失」）。
+- `SKILL.md` → v1.1.0：新原语表、`--stdin` 口径、投稿长表单配方（替换 v1.0 的「hover 给不了」结论）、新增「中文 .ps1 必须 BOM」等坑。
+- `docs/04` 能力矩阵按实测重写 L3/L4 与新增 §8 语义层；`docs/11` 增 K36–K46；`docs/07` 增 M8 验收记录；`SKILL.md` §8 改写为「正文走 TextPattern、网页元素在 depth 12–13、异步 a11y 要轮询」。
+- `docs/18` 新增：网页语义通道实验（三通道覆盖率/延迟对照、页面元素动作实测、异步 a11y 观测、v1.2 建议）。结论：网页读/写/点**不需要 CDP**。
+
+### Fixed
+- `wuia` 的 find 分支缺 `-not $Action` 条件，导致「find 条件 + 动作」总是提前 exit 0，动作从未执行（K40）。
+- `wuia` 对 TextBlock 的 `--get-text` 回落到 `Name`（WPF 不给 TextPattern，K38）。
+- `tests/check-m1.sh` 的 C3 对最小化窗口改判 SKIP：UIA 矩形为 null 时没有可比几何（K36）。
+- `tests/check-m10.sh` 混入一个 NUL 字节导致工具判定为二进制文件，已清除。
+- 夹具 `uiawnd.ps1` 存成无 BOM UTF-8，PowerShell 5.1 按 ANSI 读，中文按钮名变乱码（K39）。
+
+### Measured
+- 夜间全表：m1 16/0 + 1 SKIP（C3，目标窗口最小化）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0。
+- 网页三通道（同一页面）：CDP innerText 316 字符/0.11 s；UIA TextPattern 347 字符/1.50 s；剪贴板 353 字符/2.00 s。UIA 默认深度 10 命中率 0，depth 16 命中。
+- 单次原语仍是 600–750 ms；`ops/` 把多步压进一次调用（click-element 一次 ≈ 1.3 s）。
+- `check-release.sh` pass=yes；`dist/` 重出 tar.gz + zip + SHA256SUMS。
+
 ## [1.0.0] - 2026-10-21
 
 首个正式版：**在授权窗口内操作 Windows 桌面**的能力包冻结。

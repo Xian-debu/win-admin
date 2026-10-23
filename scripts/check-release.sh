@@ -18,8 +18,10 @@ for f in VERSION LICENSE CHANGELOG.md THIRD_PARTY_NOTICES.md docs/10-deployment.
 done
 
 # 3. payload scripts must set UTF-8 before doing anything (K1)
+# v1.1: param blocks grow with new switches, so the UTF-8 assertion looks at the first 40 lines
+# (still before any payload work: every script sets it right after param()).
 for f in "$REPO"/win/*.ps1; do
-  h="$(head -20 "$f")"
+  h="$(head -40 "$f")"
   if printf '%s' "$h" | grep -q 'OutputEncoding'; then
     pass "utf8 first lines: $(basename "$f")"
   elif printf '%s' "$h" | grep -q 'wa-core.ps1'; then

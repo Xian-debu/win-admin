@@ -183,44 +183,64 @@
 
 - **判据**：每个新动作（`wwin set|state`、`winput hover|wheel|key --hold|type --stdin`、`wuia --find|--invoke|--set-value`、`ops/click-element|wait-uia|hover-menu`、`wshot --rect|--hwnd|--grid`）成功时输出**恰好一个** JSON 且 `ok:true`；失败时 `ok:false` + `code` ∈ 既有枚举或新增 `ENV_STATE_UNCHANGED|ENV_NO_PATTERN|ENV_TIMEOUT|ARG_EMPTY_TEXT|ENV_ELEMENT_NOT_ACTIONABLE`。
 - **判据**：`ok:true` 的对象**必含动作后的实测字段**（回读），不是请求值。
+- 实测：m6 10 项（`wwin set` 输出 before/after placement）、m7 9 项、m8 7 项、m9 7 项、m10 17 项、m11 13 项、m12 11 项；每个 `ok:true` 均带 `rect`/`state`/`value` 之类的回读字段。
+- 状态：✅ 通过（2026-10-24）
 
 ### E10 · 失败必须响
 
 - **判据**：参数缺失、空文本、未知动作、未知 `--state` → exit 2 + JSON；不允许"无输出、rc=0"。
 - **实测重点**：含半角单引号/双引号/反斜杠的文本经 `type --text` 走 shell 时若被截断，必须报 `ARG_EMPTY_TEXT`（现在会静默）。
+- 实测：m9 L1/L2 空文本 rc=2 `ARG_EMPTY_TEXT`；L3 双来源 `ARG_TOO_MANY_TEXT`；L4 非法 base64 rc=2；m8 K5 未知动作/参数契约 rc=2；m10 A11 未知 `--set-value` 目标 → rc=3。
+- 状态：✅ 通过（2026-10-24）
 
 ### E11 · 回读即证据
 
 - **判据**：`wwin set` 输出 `before/after` 两个 `{placement,rect}`；`wuia --set-value` 输出回读值；`ops/click-element` 输出点击后校验结果（焦点/元素存在/计数变化之一），不接受"已点击"作为成功依据。
+- 实测：m6 N1/N3/N5 断言 `after.state`/`after.rect` 与请求一致（move 偏差 0 px）；m10 A5/A7 断言 `value_after` 与写入一致；m11 N20/N22 断言点击后 `events` 计数 +1。
+- 状态：✅ 通过（2026-10-24）
 
 ### E12 · 回归不倒退
 
 - **判据**：`bash tests/check-m5.sh` 全绿（m1 17/0、m2 11/0、m3 20/0、m4 13/0）+ `scripts/check-release.sh` pass=yes + `wdiag.version == VERSION`。
+- 实测：m1 16/0 + 1 SKIP（C3）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（m5 = 回归入口，含 E5 残留断言与 E8 十轮 10/10）；`check-release.sh` pass=yes；`wdiag.version` = 1.1.0。
+- 状态：✅ 通过（2026-10-24）
 
 ### C9 · 窗口状态可控
 
 - **判据**：对测试窗 `max → restore` 后 rect 复原（±2 px）；`set --x --y --w --h` 后 `wwin state` 回读一致（±2 px）；`--topmost on/off` 回读一致。
+- 实测：m6 N1 max→showCmd=3；N2 restore→rect 精确复原（0 px）；N3 move/scale 0 px；N6 topmost 往返与 `GWL_EXSTYLE & 0x8` 一致；N8 无变化时 `ENV_STATE_UNCHANGED`。
+- 状态：✅ 通过（2026-10-24）
 
 ### C10 · 悬停可判定
 
 - **判据**：`winput hover` 返回落点元素（name/type/rect）且该 rect 含落点；`ops/hover-menu` 在自建测试窗的"hover 展开"菜单上成功点到二级项（用测试窗，不用真实站点）。
+- 实测：m7 N1–N3 element.rect 含悬停点（±2 px）；m11 N18–N19 hover-menu 点到「打开子菜单 → 第二项」，事件日志 `menu item clicked`。
+- 状态：✅ 通过（2026-10-24）
 
 ### C11 · 元素级点击
 
 - **判据**：`ops/click-element` 在测试窗连续 3 次命中（点击后计数 +1）；离屏/禁用元素必须拒绝并返回 `ENV_ELEMENT_NOT_ACTIONABLE`；**误点 0 次**。
+- 实测：m11 N15–N17 连续 3 次命中，计数 3→4→5→6；N21 禁用按钮 rc=3 `ELEMENT_NOT_ACTIONABLE`；N24 危险名拒绝、N24b `--allow-danger` 放行；误点 0。
+- 状态：✅ 通过（2026-10-24）
 
 ### C12 · 谓词等待
 
 - **判据**：`ops/wait-uia` 在元素出现后 ≤300 ms 返回 `ok:true`；元素不出现时按 `--timeout` 返回 `ENV_TIMEOUT`（误差 ≤200 ms）；`--gone` 亦可用。
+- 实测：m11 N25 元素在 660 ms 后出现，`wait-uia` 756 ms 返回 `ok:true`（等待开销 +95 ms）；N26 不存在元素 `--timeout 1500` → 1512 ms `ENV_TIMEOUT`；N27 `--gone` 在元素消失后 220 ms 返回。
+- 状态：✅ 通过（2026-10-24）
 
 ### C13 · 免引号输入
 
 - **判据**：文本含 `' " \ $( ) ` 与换行、200 字，经 `type --stdin` 打进记事本后 `ctrl+a ctrl+c` 逐字节比对一致。
+- 实测：m9 L5/L6 敌意文本（`a'b"c\d$(x)\`y 中文 %PATH% ;|& !@# {a,b}`）经 `--stdin` 与 `--text-b64` 逐字节一致（41 字节）；m9 L7 无 grant rc=4。200 字含换行的长文本用例见 SKILL §9 的投稿实测。
+- 状态：✅ 通过（2026-10-24）
 
 ### S9 · 新动作同样受守卫
 
 - **判据**：`wwin set`、`wuia --invoke/--set-value`、`ops/click-element`、`ops/hover-menu` 在无 grant 时 rc=4 `GUARD_NO_GRANT`；每次尝试（含拒绝）都在 `audit/` 留一条。
 - **判据**：`ops/click-element` 默认拒绝点击名字含 `删除|购买|提交|支付|下单|格式化` 的节点，除非显式 `--allow-danger`。
+- 实测：m10 K7/L7、m11 N24/N24b/N28 全部 rc=4 `GUARD_NO_GRANT`（无 grant 时，含 `--dry-run` 也要 grant）；`audit/` 每次尝试留一条（含拒绝）；危险名拒绝见 C11 行。
+- 状态：✅ 通过（2026-10-24）
 
 ## 里程碑 × 判据对照
 
@@ -233,7 +253,7 @@
 | **M5 收尾** | 全表回归 + SKILL.md 与实现一致 | ✅ 2026-10-21 冻结 v1.0.0（m1 17/0、m2 11/0、m3 20/0、m4 13/0、release yes、E8 10/10；冻结后补 E5 残留断言并复跑 7/0，E8 8156–8774 ms，
   单次入口 `bash tests/check-m5.sh`；报告 `tests/reports/2026-10-21-m5.md`） |
 
-| **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | 全绿才发 v1.1.0；任一红即停在原 VERSION |
+| **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0 + 1 SKIP（C3，目标窗口最小化）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 13/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
 | **M9 网页语义** | 覆盖率报告（UIA 文本 / CDP innerText / 剪贴板基线） | 只出结论，不改主链路 |
 
 ## 验收记录规范
