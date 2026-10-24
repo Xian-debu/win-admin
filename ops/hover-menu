@@ -12,7 +12,7 @@ usage() {
   cat <<'EOF'
 usage: ops/hover-menu (--hwnd H | --title REGEX) --at X,Y --pick RE
                      [--dwell MS] [--timeout MS] [--interval MS] [--verify none|alive|gone|value:RE]
-                     [--yes]
+                     [--allow-related] [--yes]
   --at      screen point to hover (the parent item)
   --pick    UIA name regex of the item that appears while hovering
   --dwell   hover dwell before looking for --pick (default 600 ms)
@@ -34,6 +34,7 @@ while [ $# -gt 0 ]; do
     --interval) INTERVAL="$2"; shift 2 ;;
     --verify) VERIFY="$2"; shift 2 ;;
     --yes) REAL=1; shift ;;
+    --allow-related) ALLOW_RELATED=1; shift ;;
     --dry-run) REAL=0; shift ;;
     *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
   esac
@@ -57,10 +58,12 @@ if [ "$REAL" -eq 0 ]; then
 fi
 
 op_pause_gate input
-op_focus "$H" >/dev/null || { WA_AUDIT_RESULT=ENV_NOT_FOREGROUND; op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground"; }
+op_focus "$H" >/dev/null || { FC="${OP_FOCUS_CODE:-ENV_NOT_FOREGROUND}"; WA_AUDIT_RESULT="$FC"; op_die "$FC" "${OP_FOCUS_MSG:-could not bring hwnd $H to the foreground}"; }
 
 # 1) hover and hold long enough for the provider to build the submenu
-HV="$(bash "$REPO_DIR/bin/winput" hover "$AX" "$AY" --expect-hwnd "$H" --dwell "$DWELL" --yes)"; HRC=$?
+HV_ARGS=(hover "$AX" "$AY" --expect-hwnd "$H" --dwell "$DWELL" --yes)
+[ "${ALLOW_RELATED:-0}" -eq 1 ] && HV_ARGS+=(--allow-related)
+HV="$(bash "$REPO_DIR/bin/winput" "${HV_ARGS[@]}")"; HRC=$?
 if [ $HRC -ne 0 ]; then
   CODE="$(printf '%s' "$HV" | jq -r '.code // "EXEC_HOVER_FAILED"')"
   WA_AUDIT_RESULT="$CODE"; printf '%s\n' "$HV"; exit "$HRC"
@@ -129,5 +132,5 @@ fi
 
 WA_AUDIT_RESULT=ok
 jq -nc --argjson h "$H" --argjson n "$NODE" --arg a "$ACT" --argjson aj "$AJ" --argjson d "$VERDICT" --argjson hv "$HV" \
-  '{ok:true,injected:true,tool:"ops/hover-menu",hwnd:$h,node:$n,action:$a,verdict:$d,hover:$hv,result:$aj}'
+  '{ok:true,injected:true,tool:"ops/hover-menu",hwnd:$h,node:$n,action:$a,verdict:$d,hover:$hv,result:$aj,statePreserved:true}'
 exit 0

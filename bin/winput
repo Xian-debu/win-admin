@@ -29,6 +29,8 @@ Flags for all actions:
   --dry-run          only print the plan (default)
   --expect-hwnd H    required for click/dclick/drag (S7: never click blind)
   --focus            try SetForegroundWindow when target is not foreground
+  --allow-related    accept a point/foreground that lands on an owner or child dialog of
+                     --expect-hwnd (same window family); JSON reports matched:"related"
   --no-restore-clip  for type: do not restore the previous clipboard
 exit 0 ok | 2 arg | 3 env (locked / wrong window / not foreground) | 4 guard | 5 exec
 EOF
@@ -36,7 +38,7 @@ EOF
 
 ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
 DELTA=120; TIMES=1; HORIZ=0; DWELL=600; AT=""
-COMBO=""; HOLD=20; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0
+COMBO=""; HOLD=20; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0; ALLOW_RELATED=0
 TEXT_SET=0; B64=""; USE_STDIN=0
 HELD_FILE="$APP_ROOT/tmp/held.json"
 
@@ -61,6 +63,7 @@ while [ $# -gt 0 ]; do
     --at) AT="$2"; shift 2 ;;
     --expect-hwnd) HWND="$2"; shift 2 ;;
     --focus) FOCUS=1; shift ;;
+    --allow-related) ALLOW_RELATED=1; shift ;;
     --no-restore-clip) NOCLIP=1; shift ;;
     --text) TEXT="$2"; TEXT_SET=1; shift 2 ;;
     --stdin) USE_STDIN=1; shift 2 ;;
@@ -164,6 +167,7 @@ fi
 [ "$ACTION" = "hover" ] && args+=(-Steps "$STEPS" -Dwell "$DWELL")
 [ "$HWND" != "0" ] && args+=(-ExpectHwnd "$HWND")
 [ "$FOCUS" -eq 1 ] && args+=(-Focus)
+[ "$ALLOW_RELATED" -eq 1 ] && args+=(-AllowRelated)
 [ "$NOCLIP" -eq 1 ] && args+=(-NoRestoreClip)
 [ "$REAL" -eq 0 ] && args+=(-DryRun)
 

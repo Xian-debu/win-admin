@@ -160,11 +160,24 @@ function Get-WaWindowInfo([IntPtr]$h) {
     }
 }
 
+# SW_RESTORE (9) on an already-maximized window silently un-maximizes it (K49, docs/19 F3):
+# every ops/* called op_focus -> wwin focus -> here, so a maximized target collapsed to windowed
+# between two steps and every coordinate went stale. Only a MINIMIZED window needs a state
+# change to become foreground-able; for everything else the attach-thread dance suffices.
+function Restore-IfMinimized([IntPtr]$h) {
+    if ([Wa.Native]::IsIconic($h)) {
+        [void][Wa.Native]::ShowWindow($h, 9)
+        Start-Sleep -Milliseconds 150
+        return $true
+    }
+    return $false
+}
+
 # Foreground activation without synthetic input. Windows blocks SetForegroundWindow from a
 # background process; attaching our input queue to BOTH the target window's thread and the
 # current foreground thread lifts that restriction (measured 2026-10-21, M4).
 function Set-WaForeground([IntPtr]$h) {
-    [void][Wa.Native]::ShowWindow($h, 9)
+    [void](Restore-IfMinimized $h)
     [void][Wa.Native]::BringWindowToTop($h)
     if ([Wa.Native]::GetForegroundWindow() -eq $h) { return $true }
     [void][Wa.Native]::SetForegroundWindow($h)
@@ -183,6 +196,13 @@ function Set-WaForeground([IntPtr]$h) {
     [void][Wa.Native]::SetForegroundWindow($h)
     [void][Wa.Native]::BringWindowToTop($h)
     foreach ($t in $attached) { [void][Wa.Native]::AttachThreadInput($myThread, $t, $false) }
+    if ([Wa.Native]::GetForegroundWindow() -ne $h) {
+        # Last resort before giving up: SW_SHOWNOACTIVATE presents the window without changing
+        # its placement (unlike SW_RESTORE). Keeps K49 fixed even when the foreground lock is
+        # unusually stubborn.
+        [void][Wa.Native]::ShowWindow($h, 4)
+        [void][Wa.Native]::SetForegroundWindow($h)
+    }
     for ($i = 0; $i -lt 20; $i++) {
         if ([Wa.Native]::GetForegroundWindow() -eq $h) { return $true }
         Start-Sleep -Milliseconds 50

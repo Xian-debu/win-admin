@@ -22,6 +22,7 @@ usage: ops/click-element (--hwnd H | --title REGEX) [--name RE] [--type RE] [--a
                gone:RE   no element matching RE may exist after the action (dialog closed)
                alive     default: the same find criteria still resolve to a node
   --timeout    verification deadline in ms (default 3000)
+  --allow-related  accept a click landing on an owner/child dialog of --hwnd (same family)
   --allow-danger  required to act on a node whose name looks destructive
                (删除|购买|提交|支付|下单|格式化|delete|buy|submit|pay|order|format)
   default      dry-run: print the candidates, the chosen node and the strategy
@@ -31,7 +32,7 @@ EOF
 
 HWND=0; TITLE=""; NAME=""; TYPE=""; AID=""; CLASS=""; IDX=0
 DOUBLE=0; STRATEGY=auto; VERIFY=alive; TIMEOUT=3000; INTERVAL=150; REAL=0; DEPTH=10; MAX=3000; DEEPENED=0
-ALLOW_DANGER=0
+ALLOW_DANGER=0; RELATED=0
 # S9: destructive-looking names are refused by default. This is not a technical limit, it is a
 # deliberate speed bump: a mis-resolved node named "删除" costs more than one extra flag.
 DANGER_RE='删除|购买|提交|支付|下单|格式化|清空|重置|delete|remove|buy|submit|pay|order|format|reset'
@@ -53,6 +54,7 @@ while [ $# -gt 0 ]; do
     --depth) DEPTH="$2"; shift 2 ;;
     --max) MAX="$2"; shift 2 ;;
     --allow-danger) ALLOW_DANGER=1; shift ;;
+    --allow-related) RELATED=1; shift ;;
     --yes) REAL=1; shift ;;
     --dry-run) REAL=0; shift ;;
     *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
@@ -128,8 +130,9 @@ if [ "$STRATEGY" = invoke ]; then
   AJ="$(bash "$REPO_DIR/bin/wuia" "${IARGS[@]}")"; ARC=$?
   ACTION="invoke"
 else
-  op_focus "$H" >/dev/null || { WA_AUDIT_RESULT=ENV_NOT_FOREGROUND; op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground"; }
+  op_focus "$H" >/dev/null || { FC="${OP_FOCUS_CODE:-ENV_NOT_FOREGROUND}"; WA_AUDIT_RESULT="$FC"; op_die "$FC" "${OP_FOCUS_MSG:-could not bring hwnd $H to the foreground}"; }
   CARGS=(click "$CX" "$CY" --expect-hwnd "$H" --yes)
+  [ "$RELATED" -eq 1 ] && CARGS+=(--allow-related)
   [ "$DOUBLE" -eq 1 ] && CARGS+=(--count 2)
   AJ="$(bash "$REPO_DIR/bin/winput" "${CARGS[@]}")"; ARC=$?
   ACTION="click"
@@ -189,5 +192,5 @@ fi
 WA_AUDIT_RESULT=ok
 jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" --arg a "$ACTION" \
   --argjson aj "$AJ" --argjson d "$detail" --argjson x "$CX" --argjson y "$CY" --argjson dp "$DEEPENED" \
-  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj,deepened:($dp==1)}'
+  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj,deepened:($dp==1),statePreserved:true}'
 exit 0

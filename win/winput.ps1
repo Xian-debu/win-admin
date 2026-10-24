@@ -19,6 +19,7 @@ param(
     [long]$ExpectHwnd = 0,
     [switch]$DryRun,
     [switch]$Focus,
+    [switch]$AllowRelated,
     [switch]$NoRestoreClip
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -39,6 +40,8 @@ Add-Type -Namespace WaInput -Name Native -MemberDefinition @'
 [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr h);
 [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr h);
 [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr h, int cmd);
+[DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
+[DllImport("user32.dll")] public static extern IntPtr GetDesktopWindow();
 [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X; public int Y; }
 '@ | Out-Null
 
@@ -98,31 +101,87 @@ function Get-TargetInfo([IntPtr]$h) {
     return $w
 }
 
+# Window family (v1.2 T13): a modal child dialog and its owner are different ROOT windows, so
+# comparing roots declares "different window" for a window the user is plainly looking at.
+# docs/19 F1: the "invalid file name" #32770 could not be clicked for exactly this reason.
+# The chain walks BOTH the parent and the owner links (a modal dialog is owner-linked, an MDI
+# child is parent-linked), stops at the desktop, and is capped so a cycle cannot hang us.
+function Get-FamilyChain([IntPtr]$h) {
+    $seen = New-Object System.Collections.ArrayList
+    $desktop = [WaInput.Native]::GetDesktopWindow()
+    $cur = $h
+    for ($i = 0; $i -lt 24 -and $cur -ne [IntPtr]::Zero -and $cur -ne $desktop; $i++) {
+        if ($seen -contains $cur.ToInt64()) { break }
+        [void]$seen.Add($cur.ToInt64())
+        $nx = [WaInput.Native]::GetAncestor($cur, 1)
+        if ($nx -eq [IntPtr]::Zero -or $nx -eq $desktop) { $nx = [WaInput.Native]::GetWindow($cur, 4) }
+        $cur = $nx
+    }
+    return $seen
+}
+
+function Test-Related([IntPtr]$a, [IntPtr]$b) {
+    if ($a -eq $b) { return $true }
+    $ca = Get-FamilyChain $a
+    $cb = Get-FamilyChain $b
+    foreach ($x in $ca) { if ($cb -contains $x) { return $true } }
+    return $false
+}
+
+# Human-readable description of whatever is under a point: F8 showed a bare hwnd pair leaves the
+# operator unable to tell "my coordinate is wrong" from "something is covering the target".
+function Get-HitDesc([IntPtr]$h) {
+    if ($h -eq [IntPtr]::Zero) { return 'no window' }
+    $w = Get-WaWindowInfo $h
+    $t = if ($w.title) { '"' + $w.title + '"' } else { '(untitled)' }
+    return ('hwnd 0x' + $h.ToInt64().ToString('x') + ' ' + $t + ' class ' + $w.class + ' pid ' + $w.pid + ' rect ' + $w.rect.x + ',' + $w.rect.y + ' ' + $w.rect.w + 'x' + $w.rect.h)
+}
+
 function Assert-Target([IntPtr]$target, [int]$px, [int]$py, [bool]$needPoint, [bool]$doFocus) {
-    $fg = Get-Root ([WaInput.Native]::GetForegroundWindow())
-    if ($target -ne [IntPtr]::Zero) {
-        if (-not [Wa.Native]::IsWindow($target)) { return @{ ok = $false; code = 'ENV_NO_WINDOW'; msg = 'target hwnd is not a window' } }
-        if ($needPoint) {
-            $pt = New-Object WaInput.Native+POINT
-            $pt.X = $px; $pt.Y = $py
-            $under = Get-Root ([WaInput.Native]::WindowFromPoint($pt))
-            if ($under -ne $target) {
-                return @{ ok = $false; code = 'ENV_WINDOW_MISMATCH'; msg = "point ($px,$py) hits hwnd 0x$($under.ToInt64().ToString('x')), expected 0x$($target.ToInt64().ToString('x'))" }
-            }
+    $fgRaw = [WaInput.Native]::GetForegroundWindow()
+    $fg = Get-Root $fgRaw
+    if ($target -eq [IntPtr]::Zero) { return @{ ok = $true; foreground = $fg; matched = 'hwnd' } }
+    if (-not [Wa.Native]::IsWindow($target)) { return @{ ok = $false; code = 'ENV_NO_WINDOW'; msg = 'target hwnd is not a window' } }
+    $matched = 'hwnd'
+    if ($needPoint) {
+        $pt = New-Object WaInput.Native+POINT
+        $pt.X = $px; $pt.Y = $py
+        $underRaw = [WaInput.Native]::WindowFromPoint($pt)
+        $under = Get-Root $underRaw
+        $rel = $false
+        if ($under -ne $target -and $AllowRelated) { $rel = Test-Related $underRaw $target }
+        if ($under -ne $target -and -not $rel) {
+            return @{ ok = $false; code = 'ENV_WINDOW_MISMATCH'; msg = ('point (' + $px + ',' + $py + ') hits ' + (Get-HitDesc $underRaw) + ', expected ' + (Get-HitDesc $target) + '; pass --allow-related for an owner/child dialog') }
         }
-        if ($fg -ne $target) {
-            if ($doFocus) {
-                [WaInput.Native]::ShowWindow($target, 9) | Out-Null
+        if ($rel) { $matched = 'related' }
+    }
+    $fgOk = ($fg -eq $target)
+    if (-not $fgOk -and $AllowRelated -and $fgRaw -ne [IntPtr]::Zero) { $fgOk = Test-Related $fgRaw $target }
+    if (-not $fgOk) {
+        if ($doFocus) {
+            # K49: SW_RESTORE un-maximizes; only a minimized window needs it.
+            if ([Wa.Native]::IsIconic($target)) { [WaInput.Native]::ShowWindow($target, 9) | Out-Null }
+            [WaInput.Native]::SetForegroundWindow($target) | Out-Null
+            Start-Sleep -Milliseconds 150
+            $fgRaw = [WaInput.Native]::GetForegroundWindow()
+            $fg = Get-Root $fgRaw
+            $fgOk = ($fg -eq $target)
+            if (-not $fgOk -and $AllowRelated -and $fgRaw -ne [IntPtr]::Zero) { $fgOk = Test-Related $fgRaw $target }
+            if (-not $fgOk) {
+                [WaInput.Native]::ShowWindow($target, 4) | Out-Null
                 [WaInput.Native]::SetForegroundWindow($target) | Out-Null
                 Start-Sleep -Milliseconds 150
-                $fg = Get-Root ([WaInput.Native]::GetForegroundWindow())
-            }
-            if ($fg -ne $target) {
-                return @{ ok = $false; code = 'ENV_NOT_FOREGROUND'; msg = "target 0x$($target.ToInt64().ToString('x')) is not foreground (foreground 0x$($fg.ToInt64().ToString('x')))" }
+                $fgRaw = [WaInput.Native]::GetForegroundWindow()
+                $fg = Get-Root $fgRaw
+                $fgOk = ($fg -eq $target)
+                if (-not $fgOk -and $AllowRelated -and $fgRaw -ne [IntPtr]::Zero) { $fgOk = Test-Related $fgRaw $target }
             }
         }
+        if (-not $fgOk) {
+            return @{ ok = $false; code = 'ENV_NOT_FOREGROUND'; msg = ('target ' + (Get-HitDesc $target) + ' is not foreground (foreground ' + (Get-HitDesc $fgRaw) + ')') }
+        }
     }
-    return @{ ok = $true; foreground = $fg }
+    return @{ ok = $true; foreground = $fg; matched = $matched }
 }
 
 # Hover/wheel targets may be popups (menus, tooltips, combo drop-downs): their root window is
@@ -219,7 +278,7 @@ switch ($Action) {
     'click' {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
-        if ($DryRun) { Out-Plan 'click' @{ point = @{ x = $X; y = $Y }; button = $Button; count = $Count; target = (Get-TargetInfo $target) }; exit 0 }
+        if ($DryRun) { Out-Plan 'click' @{ point = @{ x = $X; y = $Y }; button = $Button; count = $Count; matched = $chk.matched; target = (Get-TargetInfo $target) }; exit 0 }
         $down = 0x02; $up = 0x04
         if ($Button -eq 'right') { $down = 0x08; $up = 0x10 }
         elseif ($Button -eq 'middle') { $down = 0x20; $up = 0x40 }
@@ -234,7 +293,7 @@ switch ($Action) {
         $p = New-Object WaInput.Native+POINT
         [WaInput.Native]::GetCursorPos([ref]$p) | Out-Null
         $fg = Get-Root ([WaInput.Native]::GetForegroundWindow())
-        Out-WaJson @{ ok = $true; action = 'click'; injected = $true; button = $Button; count = $Count; point = @{ x = $p.X; y = $p.Y }; target = (Get-TargetInfo $target); foreground = (Get-TargetInfo $fg); version = $Version }
+        Out-WaJson @{ ok = $true; action = 'click'; injected = $true; matched = $chk.matched; button = $Button; count = $Count; point = @{ x = $p.X; y = $p.Y }; target = (Get-TargetInfo $target); foreground = (Get-TargetInfo $fg); version = $Version }
     }
     'dclick' {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
@@ -315,7 +374,7 @@ switch ($Action) {
         $probe = Get-PointProbe $X $Y
         $p2 = New-Object WaInput.Native+POINT
         [void][WaInput.Native]::GetCursorPos([ref]$p2)
-        Out-WaJson @{ ok = $true; action = 'hover'; injected = $true; point = @{ x = $p2.X; y = $p2.Y }; expected = @{ x = $X; y = $Y }; steps = $Steps; dwell = $Dwell; matched = $chk.matched; under = $probe; target = (Get-TargetInfo $target); version = $Version }
+        Out-WaJson @{ ok = $true; action = 'hover'; injected = $true; matched = $chk.matched; point = @{ x = $p2.X; y = $p2.Y }; expected = @{ x = $X; y = $Y }; steps = $Steps; dwell = $Dwell; under = $probe; target = (Get-TargetInfo $target); version = $Version }
     }
     'key' {
         if (-not $Combo) { Fail 'ARG_NO_COMBO' 'key needs -Combo (e.g. ctrl+s)' 2 }
