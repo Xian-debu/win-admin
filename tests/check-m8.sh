@@ -38,16 +38,16 @@ focus_edit() {
   bin/wwin focus --hwnd "$H" >/dev/null 2>&1
   bin/winput click "$EX" "$EY" --expect-hwnd "$H" --focus --yes >/dev/null 2>&1
   sleep 0.2
-  bin/winput key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1
-  bin/winput key delete --expect-hwnd "$H" --yes >/dev/null 2>&1
-  sleep 0.15
+  # K60: clear through UIA, not ctrl+a+delete: the fixture must start empty without
+  # injecting extra key combos into the path under test.
+  clear_edit
+  sleep 0.1
 }
-read_edit() {
-  bin/winput key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1
-  bin/winput key ctrl+c --expect-hwnd "$H" --yes >/dev/null 2>&1
-  sleep 0.25
-  bin/wclip get 2>/dev/null | jq -r '.text // ""'
-}
+# K60: read the text back through UIA ValuePattern instead of ctrl+a/ctrl+c.
+# The clipboard round trip injects two more key combos into the very input path under test,
+# so a slow pump that turns ctrl+a into a literal "a" shows up as a phantom extra character.
+read_edit() { bin/wuia --hwnd "$H" --find-type Edit --get-value 2>/dev/null | jq -r '.value // ""'; }
+clear_edit() { bin/wuia --hwnd "$H" --find-type Edit --set-value "" >/dev/null 2>&1 || true; }
 
 # ---- K1: keydown + keyup of one character types it exactly once ----
 focus_edit

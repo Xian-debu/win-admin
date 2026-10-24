@@ -36,16 +36,13 @@ focus_edit() {
   bin/wwin focus --hwnd "$H" >/dev/null 2>&1
   bin/winput click "$EX" "$EY" --expect-hwnd "$H" --focus --yes >/dev/null 2>&1
   sleep 0.2
-  bin/winput key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1
-  bin/winput key delete --expect-hwnd "$H" --yes >/dev/null 2>&1
-  sleep 0.15
+  # K60: clear and read back through UIA ValuePattern, so the assertions are not polluted by
+  # extra injected key combos (a slow pump can turn ctrl+a into a literal "a").
+  clear_edit
+  sleep 0.1
 }
-read_edit() {
-  bin/winput key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1
-  bin/winput key ctrl+c --expect-hwnd "$H" --yes >/dev/null 2>&1
-  sleep 0.25
-  bin/wclip get 2>/dev/null | jq -r '.text // ""'
-}
+clear_edit() { bin/wuia --hwnd "$H" --find-type Edit --set-value "" >/dev/null 2>&1 || true; }
+read_edit() { bin/wuia --hwnd "$H" --find-type Edit --get-value 2>/dev/null | jq -r '.value // ""'; }
 want="$(cat "$TXTF")"
 
 # ---- L1: empty --text is refused loudly (rc=2 ARG_EMPTY_TEXT), not a silent no-op ----
@@ -72,13 +69,20 @@ if [ "$l4" -eq 2 ]; then pass "L4 bad base64 rc=2"; else fail "L4 bad base64 rc=
 
 # ---- L5: hostile text via --stdin lands byte-identical ----
 focus_edit
-bin/winput type --stdin --expect-hwnd "$H" --focus --yes < "$TXTF" >/dev/null 2>&1
+L5OUT="$(bin/winput type --stdin --expect-hwnd "$H" --focus --yes < "$TXTF" 2>&1)"
 sleep 0.5
 T5="$(read_edit)"
 if [ "$T5" = "$want" ]; then
   pass "L5 --stdin typed hostile text byte-identical ($(printf '%s' "$T5" | wc -c) bytes)"
 else
-  fail "L5 --stdin mismatch: got='$T5' want='$want'"
+  fail "L5 --stdin mismatch: got='$T5' want='$want' (type said: $(printf '%s' "$L5OUT" | head -c 200))"
+fi
+# K57: the clipboard is restored only after the paste is visible, so the JSON must say it settled
+L5S="$(printf '%s' "$L5OUT" | jq -r '.pasteSettled // false' 2>/dev/null || echo false)"
+if [ "$L5S" = "true" ]; then
+  pass "L5b clipboard restored only after the paste landed (pasteSettled=true)"
+else
+  fail "L5b pasteSettled=$L5S"
 fi
 
 # ---- L6: the same text via --text-b64 lands identically ----

@@ -87,6 +87,7 @@ $null = $app.Dispatcher.InvokeAsync({
     $child.Show()
     $other.Show()
     $o = [ordered]@{
+        pid            = $PID
         hwnd_dec       = (Get-Handle $main)
         child_hwnd_dec = (Get-Handle $child)
         other_hwnd_dec = (Get-Handle $other)
