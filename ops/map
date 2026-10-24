@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ops/map - the element map: what is on this window, numbered, and where. Read-only (shot + UIA).
+# Built for the real bottleneck in the field sessions (docs/19 F6): the loop was
+# "screenshot -> look at the picture -> guess a coordinate -> click". The map replaces the guess
+# with a number that a second command (wuia --find-aid / ops/click-element) can use again.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-map "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/map (--hwnd H | --title REGEX) [--out PATH.png] [--text] [--depth N] [--max N]
+                [--min-w N] [--min-h N]
+  Lists every element that is on screen and has a real rect, numbered in reading order (y,x),
+  and (unless --text) draws them on a screenshot of the window: red 2px box + idx for
+  actionable elements, faint grey box for the rest.
+  --text           no screenshot, list only (zero shot cost: "what is on this page?")
+  --min-w/--min-h  drop elements smaller than N px (noise filter)
+  output: {ok,hwnd,png,count,actionable,nodes:[{idx,role,name,aid,class,rect,patterns,actionable}]}
+  actionable = enabled + on screen + has at least one action pattern (invoke/toggle/select/...)
+  exit 0 ok | 2 arg | 3 no window | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; OUT=""; TEXT=0; DEPTH=16; MAX=400; MINW=1; MINH=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --out) OUT="$2"; shift 2 ;;
+    --text) TEXT=1; shift ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --max) MAX="$2"; shift 2 ;;
+    --min-w) MINW="$2"; shift 2 ;;
+    --min-h) MINH="$2"; shift 2 ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$DEPTH$MAX$MINW$MINH" in *[!0-9]*) echo 'numeric flags must be numbers' >&2; exit 2 ;; esac
+[ "$DEPTH" -ge 1 ] && [ "$MINW" -ge 1 ] && [ "$MINH" -ge 1 ] || { echo 'depth/min-w/min-h must be >= 1' >&2; exit 2; }
+
+# read-only: UIA enumeration and screenshots inject nothing, so scope=input is NOT required (S11)
+op_pause_gate read
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s
+' "$H"; exit "$RC"; }
+H="$((H))"
+
+# One tree dump; everything else is arithmetic on it. depth 16 by default because Chromium
+# page content lives at depth 12+ (docs/18).
+TJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --depth "$DEPTH" --max "$MAX" 2>/dev/null)" || {
+  printf '%s
+' "$TJ"; exit 5; }
+if [ "$(printf '%s' "$TJ" | jq -r '.ok // false')" != "true" ]; then printf '%s
+' "$TJ"; exit 3; fi
+
+# Reading order is (y,x) with role/name as tie-breakers so two calls on the same tree number
+# identically. The window root (depth 0) is not a target: it would box the whole shot.
+NODES="$(printf '%s' "$TJ" | jq -c --argjson mw "$MINW" --argjson mh "$MINH" '
+  [ .nodes[]
+    | select(.depth > 0)
+    | select(.offscreen == false)
+    | select((.rect.w // 0) >= $mw and (.rect.h // 0) >= $mh)
+    | { role: (.type // "" | sub("^ControlType\\.?"; "")),
+        name: (.name // ""), aid: (.aid // ""), class: (.class // ""),
+        rect: .rect, patterns: (.patterns // []), enabled: (.enabled // false),
+        actionable: ((.enabled // false)
+          and (((.patterns // []) | map(select(test("^(Invoke|Toggle|SelectionItem|ExpandCollapse|Value|RangeValue|ScrollItem)$"))) | length) > 0)) }
+  ]
+  | sort_by([.rect.y, .rect.x, .role, .name])
+  | to_entries | map(.value + {idx: .key})')"
+COUNT="$(printf '%s' "$NODES" | jq 'length')"
+ACTIONABLE="$(printf '%s' "$NODES" | jq '[.[] | select(.actionable)] | length')"
+
+PNG=""; PNG_WSL=""
+if [ "$TEXT" -eq 0 ]; then
+  SHOT="${OUT:-$APP_ROOT/shots/map-$(date +%Y%m%d-%H%M%S)-$$.png}"
+  SJ="$(bash "$REPO_DIR/bin/wshot" --hwnd "$H" --out "$SHOT" 2>/dev/null)" || { printf '%s
+' "$SJ"; exit 5; }
+  if [ "$(printf '%s' "$SJ" | jq -r '.ok // false')" != "true" ]; then printf '%s
+' "$SJ"; exit 3; fi
+  PNG="$(printf '%s' "$SJ" | jq -r '.path')"
+  PNG_WSL="$(printf '%s' "$SJ" | jq -r '.wsl_path')"
+  ORIGIN="$(printf '%s' "$SJ" | jq -r '[.x, .y] | @tsv')"
+  OX="${ORIGIN%%$'\t'*}"; OY="${ORIGIN#*$'\t'}"
+  ITEMS="$APP_ROOT/tmp/map-items-$$.txt"
+  printf '%s' "$NODES" | jq -r --argjson ox "$OX" --argjson oy "$OY" '.[]
+    | [.idx, (.rect.x - $ox), (.rect.y - $oy), .rect.w, .rect.h, (if .actionable then 1 else 0 end)] | @tsv' > "$ITEMS"
+  AN="$(winps -r -t 90 -f "$REPO_DIR/win/wannotate.ps1" -Png "$PNG" -Items "$(wa_winpath "$ITEMS")" 2>&1)"
+  if ! printf '%s' "$AN" | grep -q '"ok": *true'; then
+    printf '{"ok":false,"code":"ENV_ANNOTATE_FAILED","msg":"%s"}\n' "$(printf '%s' "$AN" | tail -1 | sed 's/"/\\"/g')"
+    exit 5
+  fi
+fi
+
+WA_AUDIT_RESULT=ok
+printf '%s' "$NODES" | jq -c --argjson h "$H" --arg png "$PNG" --arg pwsl "$PNG_WSL" \
+  --argjson n "$COUNT" --argjson a "$ACTIONABLE" '{ok:true,tool:"ops/map",hwnd:$h,png:$png,wsl_path:$pwsl,
+  count:$n,actionable:$a,nodes:.}'
+exit 0
