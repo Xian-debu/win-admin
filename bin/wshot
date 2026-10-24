@@ -1,41 +1,93 @@
 #!/usr/bin/env bash
-# bin/wshot - DPI-aware physical-pixel screenshot (full screen or a rect).
+# bin/wshot - DPI-aware physical-pixel screenshot (full screen, a rect, a box or a window).
 set -uo pipefail
 . "$(dirname "$0")/../lib/common.sh"
 
-OUT=""; RECT=""; HWND=""; GRID=0
+OUT=""; RECT=""; BOX=""; HWND=""; GRID=0; CLIP=0
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help)
       cat <<'EOF'
-usage: wshot [--out PATH.png] [--rect X,Y,W,H | --hwnd H] [--grid N]
+usage: wshot [--out PATH.png] [--rect X,Y,W,H | --box X1,Y1,X2,Y2 | --hwnd H] [--grid N] [--clip]
   Default: full virtual screen into C:/Users/Public/win-admin/shots/.
-  Prints one JSON object: path (Windows), wsl_path, x,y,w,h, bytes, screen.
-  --hwnd H   shoot exactly that window's rect (mutually exclusive with --rect)
-  --grid N   overlay a ruler every N px, labelled with absolute screen coordinates
-  exit 0 ok | 2 ARG_OUT_OF_SCREEN | 3 ENV_SECURE_DESKTOP | 5 exec failure
+  Prints one JSON object: path (Windows), wsl_path, x,y,w,h, rect, image, scale, screen,
+  bytes, sha256, grid, clipped, requested.
+  --rect X,Y,W,H     shoot that rect: X,Y = top-left, W,H = size (physical pixels, one value)
+  --box X1,Y1,X2,Y2  same, as a left-top/right-bottom pair (converted to X,Y,W,H here)
+  --hwnd H           shoot exactly that window's rect (mutually exclusive with --rect/--box)
+  --clip             trim a rect that runs off the screen instead of failing (JSON clipped:true)
+  --grid N           overlay a ruler every N px, labelled with absolute screen coordinates.
+                     The PNG is physical pixels: when reading coordinates off the image either
+                     use --grid or divide by scale (= dpi/96, reported in the JSON).
+  exit 0 ok | 2 ARG_OUT_OF_SCREEN / ARG_BAD_RECT | 3 ENV_SECURE_DESKTOP | 5 exec failure
 EOF
       exit 0 ;;
     --out) OUT="$2"; shift 2 ;;
     --rect) RECT="$2"; shift 2 ;;
+    --box) BOX="$2"; shift 2 ;;
     --hwnd) HWND="$2"; shift 2 ;;
     --grid) GRID="$2"; shift 2 ;;
-    *) echo "unknown arg: $1" >&2; exit 2 ;;
+    --clip) CLIP=1; shift ;;
+    *)
+      # a stray positional after --rect/--box is the "space separated instead of commas" mistake
+      case "$1" in
+        -*|'') echo "unknown arg: $1" >&2; exit 2 ;;
+        *) if [ -n "$RECT" ] || [ -n "$BOX" ]; then
+             echo "ARG_BAD_RECT: coordinates must be one comma-separated value, not space-separated (got extra '$1'); use --rect X,Y,W,H or --box X1,Y1,X2,Y2" >&2
+           else
+             echo "unknown arg: $1" >&2
+           fi
+           exit 2 ;;
+      esac
+      ;;
   esac
 done
 
-if [ -n "$HWND" ] && [ -n "$RECT" ]; then
-  echo "--hwnd and --rect are mutually exclusive" >&2; exit 2
+if [ -n "$HWND" ] && { [ -n "$RECT" ] || [ -n "$BOX" ]; }; then
+  echo "--hwnd and --rect/--box are mutually exclusive" >&2; exit 2
+fi
+if [ -n "$RECT" ] && [ -n "$BOX" ]; then
+  echo "--rect and --box are mutually exclusive" >&2; exit 2
 fi
 case "$GRID" in *[!0-9]*) echo "--grid must be a positive integer" >&2; exit 2 ;; esac
 if [ -n "$HWND" ]; then
   case "$HWND" in 0x*|0X*) ;; *[!0-9]*) echo "--hwnd must be a decimal or 0x handle" >&2; exit 2 ;; esac
 fi
 
+# T15: --rect is one single X,Y,W,H value. Anything else gets an actionable ARG_BAD_RECT
+# instead of a silent fall-through to "unknown arg" (docs/19 F7).
+if [ -n "$RECT" ]; then
+  case "$RECT" in
+    *,*,*,*)
+      IFS=, read -r rx ry rw rh <<< "$RECT"
+      for v in "$rx" "$ry" "$rw" "$rh"; do
+        case "$v" in ''|*[!0-9-]*) echo "ARG_BAD_RECT: --rect needs 4 integers X,Y,W,H (got '$RECT'); use --rect X,Y,W,H (one value) or --box X1,Y1,X2,Y2" >&2; exit 2 ;; esac
+      done
+      ;;
+    *) echo "ARG_BAD_RECT: --rect takes one comma-separated value X,Y,W,H (got '$RECT'); use --rect X,Y,W,H or --box X1,Y1,X2,Y2" >&2; exit 2 ;;
+  esac
+fi
+if [ -n "$BOX" ]; then
+  case "$BOX" in
+    *,*,*,*)
+      IFS=, read -r bx1 by1 bx2 by2 <<< "$BOX"
+      for v in "$bx1" "$by1" "$bx2" "$by2"; do
+        case "$v" in ''|*[!0-9-]*) echo "ARG_BAD_RECT: --box needs 4 integers X1,Y1,X2,Y2 (got '$BOX')" >&2; exit 2 ;; esac
+      done
+      if [ "$bx2" -le "$bx1" ] || [ "$by2" -le "$by1" ]; then
+        echo "ARG_BAD_RECT: --box needs X2>X1 and Y2>Y1 (got '$BOX')" >&2; exit 2
+      fi
+      RECT="$bx1,$by1,$((bx2-bx1)),$((by2-by1))"
+      ;;
+    *) echo "ARG_BAD_RECT: --box takes one comma-separated value X1,Y1,X2,Y2 (got '$BOX')" >&2; exit 2 ;;
+  esac
+fi
+
 args=(wshot -Version "$VERSION")
 if [ -n "$OUT" ]; then args+=(-Out "$(wa_winpath "$OUT")"); fi
 if [ -n "$HWND" ]; then args+=(-Hwnd "$((HWND))"); fi
 if [ "$GRID" -gt 0 ]; then args+=(-Grid "$GRID"); fi
+if [ "$CLIP" -eq 1 ]; then args+=(-Clip); fi
 if [ -n "$RECT" ]; then
   IFS=, read -r rx ry rw rh <<< "$RECT"
   args+=(-X "$rx" -Y "$ry" -W "$rw" -H "$rh")

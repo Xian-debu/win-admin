@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tests/check-m12.sh - M12 acceptance: wshot --hwnd / --grid / sha256 (T9, v1.1)
+# tests/check-m12.sh - M12 acceptance: wshot --hwnd / --grid / sha256 (T9) + --box/--clip/rect contract (T15, v1.2)
 # Covers: N24 grid overlay keeps geometry, changes pixels, leaves cell centres alone;
 #         N25 --hwnd shoots exactly the window rect; N26 --hwnd/--rect mutex;
 #         N27 --grid argument contract; N28 sha256 matches the file; N29 bad hwnd.
@@ -66,6 +66,54 @@ if [ "$RC" = "2" ]; then ok "N27b --grid -5 rejected rc=2"; else bad "N27b --gri
 J3="$(bin/wshot --hwnd 123456 --out "$TMP/m12-bad.png" 2>/dev/null)"; RC=$?
 if [ "$RC" = "3" ] && [ "$(printf %s "$J3" | jq -r .code)" = "ENV_NO_WINDOW" ]; then ok "N29 bad hwnd rc=3 ENV_NO_WINDOW"; else bad "N29 bad hwnd" "rc=$RC $(printf %s "$J3" | jq -c .code)"; fi
 
+
+# --- T15 (v1.2): --box / --clip / rect contract ---------------------------
+# N30 --box converts a left-top/right-bottom pair to X,Y,W,H
+JB="$(bin/wshot --box 100,100,500,400 --out "$TMP/m12-box.png" 2>/dev/null)"
+if [ "$(printf %s "$JB" | jq -r '.ok')" = "true" ] && [ "$(printf %s "$JB" | jq -r '.x')" = "100" ] \
+   && [ "$(printf %s "$JB" | jq -r '.y')" = "100" ] && [ "$(printf %s "$JB" | jq -r '.w')" = "400" ] \
+   && [ "$(printf %s "$JB" | jq -r '.h')" = "300" ]; then
+  ok "N30 --box 100,100,500,400 -> x100 y100 400x300"
+else
+  bad "N30 --box conversion" "$(printf %s "$JB" | jq -c '{x,y,w,h,code,msg}')"
+fi
+# N31 the new JSON fields agree with each other and with the PNG
+if [ "$(printf %s "$JB" | jq -r '.rect.w')" = "400" ] && [ "$(printf %s "$JB" | jq -r '.rect.h')" = "300" ] \
+   && [ "$(printf %s "$JB" | jq -r '.image.w')" = "400" ] && [ "$(printf %s "$JB" | jq -r '.image.h')" = "300" ] \
+   && [ "$(printf %s "$JB" | jq -r '.clipped')" = "false" ]; then
+  ok "N31 json rect/image agree and clipped=false"
+else
+  bad "N31 json fields" "$(printf %s "$JB" | jq -c '{rect,image,clipped}')"
+fi
+# N32 scale is dpi/96 (the number a caller must divide preview coordinates by)
+SC="$(printf %s "$JB" | jq -r '.scale')"
+if [ "$(awk -v s="$SC" 'BEGIN{print (s>1.0 && s<3.0)?1:0}')" = "1" ]; then ok "N32 scale reported ($SC)"; else bad "N32 scale" "$SC"; fi
+# N33 off-screen without --clip: rc=2 and the message teaches both ways out
+OUT33="$(bin/wshot --rect 2400,1500,400,300 --out "$TMP/m12-oob.png" 2>&1)"; RC=$?
+case "$OUT33" in *ARG_OUT_OF_SCREEN*--clip*--box*) M33=1 ;; *) M33=0 ;; esac
+if [ "$RC" = "2" ] && [ "$M33" = "1" ]; then ok "N33 off-screen rc=2 with --clip/--box hint"; else bad "N33 off-screen msg" "rc=$RC $OUT33"; fi
+# N34 --clip trims to the screen edge and says so
+JC="$(bin/wshot --rect 2400,1500,400,300 --clip --out "$TMP/m12-clip.png" 2>/dev/null)"
+if [ "$(printf %s "$JC" | jq -r '.ok')" = "true" ] && [ "$(printf %s "$JC" | jq -r '.w')" = "160" ] \
+   && [ "$(printf %s "$JC" | jq -r '.h')" = "100" ] && [ "$(printf %s "$JC" | jq -r '.clipped')" = "true" ] \
+   && [ "$(printf %s "$JC" | jq -r '.requested.w')" = "400" ]; then
+  ok "N34 --clip trims 400x300 at 2400,1500 to 160x100, requested echoed"
+else
+  bad "N34 --clip trim" "$(printf %s "$JC" | jq -c '{x,y,w,h,clipped,requested,code}')"
+fi
+# N35 --clip with no intersection at all still fails
+bin/wshot --rect 3000,2000,100,100 --clip >/dev/null 2>&1; RC=$?
+if [ "$RC" = "2" ]; then ok "N35 --clip fully off-screen rc=2"; else bad "N35 clip no-intersection" "rc=$RC"; fi
+# N36 space-separated coordinates: ARG_BAD_RECT, not a bare "unknown arg"
+OUT36="$(bin/wshot --rect 800 460 1900 140 2>&1)"; RC=$?
+case "$OUT36" in *ARG_BAD_RECT*comma-separated*) M36=1 ;; *) M36=0 ;; esac
+if [ "$RC" = "2" ] && [ "$M36" = "1" ]; then ok "N36 space-separated --rect rc=2 ARG_BAD_RECT"; else bad "N36 space-separated" "rc=$RC $OUT36"; fi
+# N37 --box needs X2>X1 and Y2>Y1
+bin/wshot --box 500,400,100,100 >/dev/null 2>&1; RC=$?
+if [ "$RC" = "2" ]; then ok "N37 inverted --box rc=2"; else bad "N37 inverted box" "rc=$RC"; fi
+# N38 --rect and --box are mutually exclusive
+bin/wshot --rect 0,0,10,10 --box 0,0,10,10 >/dev/null 2>&1; RC=$?
+if [ "$RC" = "2" ]; then ok "N38 --rect + --box rejected rc=2"; else bad "N38 rect/box mutex" "rc=$RC"; fi
 printf "\n%s passed, %s failed, %s skipped\n" "$PASS" "$FAIL" "$SKIP"
 [ "$FAIL" = "0" ] || exit 1
 exit 0

@@ -6,7 +6,8 @@ param(
     [int]$W = 0,
     [int]$H = 0,
     [long]$Hwnd = 0,
-    [int]$Grid = 0
+    [int]$Grid = 0,
+    [switch]$Clip
 )
 $env:WA_VERSION = if ($env:WA_VERSION) { $env:WA_VERSION } else { 'unknown' }
 if (-not $Core) { $Core = Join-Path $PSScriptRoot 'lib/wa-core.ps1' }
@@ -33,9 +34,28 @@ try {
     if ($Y -eq -999999) { $Y = $screen.y }
     if ($W -le 0) { $W = $screen.w }
     if ($H -le 0) { $H = $screen.h }
+    # T15: --clip trims the request to the screen instead of failing; without it the failure
+    # message must say what was asked, what the screen is, and the two ways to fix it.
+    $reqX = $X; $reqY = $Y; $reqW = $W; $reqH = $H
+    $clipped = $false
     if ($X -lt $screen.x -or $Y -lt $screen.y -or ($X + $W) -gt ($screen.x + $screen.w) -or ($Y + $H) -gt ($screen.y + $screen.h)) {
-        Write-WaFail 'ARG_OUT_OF_SCREEN' ("rect {0},{1} {2}x{3} outside screen {4},{5} {6}x{7}" -f $X, $Y, $W, $H, $screen.x, $screen.y, $screen.w, $screen.h)
-        exit 2
+        if ($Clip) {
+            $x1 = [Math]::Max($X, $screen.x)
+            $y1 = [Math]::Max($Y, $screen.y)
+            $x2 = [Math]::Min($X + $W, $screen.x + $screen.w)
+            $y2 = [Math]::Min($Y + $H, $screen.y + $screen.h)
+            if (($x2 - $x1) -lt 1 -or ($y2 - $y1) -lt 1) {
+                Write-WaFail 'ARG_OUT_OF_SCREEN' ("requested {0},{1} {2}x{3} does not intersect the screen {4},{5} {6}x{7}" -f $reqX, $reqY, $reqW, $reqH, $screen.x, $screen.y, $screen.w, $screen.h)
+                exit 2
+            }
+            $X = $x1; $Y = $y1; $W = $x2 - $x1; $H = $y2 - $y1
+            $clipped = $true
+        } else {
+            $msg = "rect {0},{1} {2}x{3} outside screen {4},{5} {6}x{7}" -f $reqX, $reqY, $reqW, $reqH, $screen.x, $screen.y, $screen.w, $screen.h
+            $msg += "; pass --clip to trim it, or --box X1,Y1,X2,Y2 for a left-top/right-bottom pair"
+            Write-WaFail 'ARG_OUT_OF_SCREEN' $msg
+            exit 2
+        }
     }
     if (-not $Out) {
         $dir = Join-Path $env:PUBLIC 'win-admin/shots'
@@ -82,6 +102,11 @@ try {
         ok      = $true
         path    = $Out
         x       = $X; y = $Y; w = $W; h = $H
+        rect    = @{ x = $X; y = $Y; w = $W; h = $H }
+        image   = @{ w = $W; h = $H }
+        scale   = $(if ($screen.dpi) { [Math]::Round([double]$screen.dpi / 96.0, 2) } else { 1 })
+        requested = @{ x = $reqX; y = $reqY; w = $reqW; h = $reqH }
+        clipped = $clipped
         bytes   = $len
         sha256  = $sha
         grid    = $Grid
