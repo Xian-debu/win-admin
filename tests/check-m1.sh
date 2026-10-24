@@ -12,7 +12,13 @@ say()  { printf '\n-- %s\n' "$*"; }
 
 # ---------- E1 commit discipline ----------
 say "E1 commit discipline"
-bad="$(git -C "$REPO_DIR" log --format=%s | grep -v -E '^(init|docs|probe|bin|ops|guard|test|fix|chore|release|auth|missions): ' | head -3)"
+# Object may name more than one layer when one change spans them: "bin+ops: ..." (each part
+# must still be a known object). Rule: <object(s)>: <what changed>
+bad="$(git -C "$REPO_DIR" log --format=%s | awk '
+  { if (index($0, ": ") == 0) { print $0; next }
+    obj = substr($0, 1, index($0, ": ") - 1); n = split(obj, p, "+"); bad = 0
+    for (i = 1; i <= n; i++) if (p[i] !~ /^(init|docs|probe|bin|ops|guard|test|fix|chore|release|auth|missions)$/) bad = 1
+    if (bad) print $0 }' | head -3)"
 [ -z "$bad" ] && ok E1 "all commit subjects carry a known prefix" || no E1 "bad subjects: $bad"
 
 # ---------- E2 doc/bin sync ----------
