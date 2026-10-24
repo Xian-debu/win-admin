@@ -9,32 +9,44 @@ usage:
   wclip get                     -> {ok,action:"get",text,len}
   wclip set --text "..."        -> {ok,action:"set",len}
   wclip set --text-file PATH    -> same, content read as UTF-8
+  wclip set --native-path PATH  -> put a Windows native path (C:\\dir\\file.ext) on the
+                                   clipboard, converting /mnt/c/... and forward slashes
+                                   (native file dialogs reject C:/... , docs/19 F2)
   wclip clear
 Notes: text is handed to Windows through a temp UTF-8 file, so CJK/quotes/newlines are safe.
 exit 0 ok | 2 arg | 3 env | 5 exec
 EOF
 }
 
-ACTION="get"; TEXT=""; TF=""
+ACTION="get"; TEXT=""; TF=""; NATIVE=""
 while [ $# -gt 0 ]; do
   case "$1" in
     -h|--help) usage; exit 0 ;;
     get|set|clear) ACTION="$1"; shift ;;
     --text) TEXT="$2"; shift 2 ;;
     --text-file) TF="$2"; shift 2 ;;
+    --native-path) NATIVE="$2"; shift 2 ;;
     *) echo "unknown arg: $1" >&2; usage >&2; exit 2 ;;
   esac
 done
 
-if [ "$ACTION" = "set" ] && [ -z "$TEXT" ] && [ -z "$TF" ]; then
-  echo "set needs --text or --text-file" >&2; exit 2
+if [ "$ACTION" = "set" ] && [ -z "$TEXT" ] && [ -z "$TF" ] && [ -z "$NATIVE" ]; then
+  echo "set needs --text, --text-file or --native-path" >&2; exit 2
+fi
+if [ -n "$NATIVE" ] && [ "$ACTION" != "set" ]; then echo '--native-path only applies to set' >&2; exit 2; fi
+if [ -n "$NATIVE" ] && { [ -n "$TEXT" ] || [ -n "$TF" ]; }; then
+  echo '--native-path cannot be combined with --text/--text-file' >&2; exit 2
 fi
 
 tmpf=""
 if [ "$ACTION" = "set" ]; then
   mkdir -p "$APP_ROOT/tmp"
   tmpf="$APP_ROOT/tmp/clip-$$.txt"
-  if [ -n "$TF" ]; then cp "$TF" "$tmpf"; else printf '%s' "$TEXT" > "$tmpf"; fi
+  if [ -n "$NATIVE" ]; then
+    W="$(wa_winpath "$NATIVE")"
+    W="${W//\//\\}"
+    printf '%s' "$W" > "$tmpf"
+  elif [ -n "$TF" ]; then cp "$TF" "$tmpf"; else printf '%s' "$TEXT" > "$tmpf"; fi
   args=(wclip -Version "$VERSION" -Action set -TextFile "$(wa_winpath "$tmpf")")
 else
   args=(wclip -Version "$VERSION" -Action "$ACTION")

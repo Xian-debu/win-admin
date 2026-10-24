@@ -20,6 +20,7 @@ param(
     [switch]$DryRun,
     [switch]$Focus,
     [switch]$AllowRelated,
+    [string]$VerifyMode = '',
     [switch]$NoRestoreClip
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
@@ -264,6 +265,32 @@ if ($Action -eq 'hover') {
 $target = [IntPtr]::Zero
 if ($ExpectHwnd -gt 0) { $target = [IntPtr]$ExpectHwnd }
 
+# T14: read back what the focused element holds now. value -> text -> name, in that order;
+# "available=false" means the toolkit cannot prove the text landed and the caller asked to verify.
+function Get-FocusedReadback {
+    $r = @{ available = $false; via = ''; value = ''; focused = $null }
+    try {
+        $fe = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -eq $fe) { return $r }
+        $r.focused = @{ name = $fe.Current.Name; type = $fe.Current.ControlType.ProgrammaticName; aid = $fe.Current.AutomationId }
+        $vp = $null
+        if ($fe.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+            $r.available = $true; $r.via = 'value'; $r.value = [string]$vp.Current.Value; return $r
+        }
+        $tp = $null
+        if ($fe.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
+            $r.available = $true; $r.via = 'text'; $r.value = [string]$tp.DocumentRange.GetText(-1); return $r
+        }
+        if ($fe.Current.Name) { $r.available = $true; $r.via = 'name'; $r.value = [string]$fe.Current.Name }
+    } catch { }
+    return $r
+}
+
+function Normalize-Text([string]$t) {
+    if ($null -eq $t) { return '' }
+    return ($t -replace "`r`n", "`n").TrimEnd()
+}
+
 switch ($Action) {
     'move' {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
@@ -426,9 +453,10 @@ switch ($Action) {
         Write-Held @()
         Out-WaJson @{ ok = $true; action = 'releaseall'; injected = ($held.Count -gt 0); released = $held; held = @(); version = $Version }
     }
+
     'type' {
         if (-not $TextFile) { Fail 'ARG_NO_TEXT_FILE' 'type needs -TextFile (UTF-8)' 2 }
-        if (-not (Test-Path $TextFile)) { Fail 'ARG_NO_TEXT_FILE' "missing file: $TextFile" 2 }
+        if (-not (Test-Path $TextFile)) { Fail 'ARG_TEXT_FILE_NOT_FOUND' "text file not found: $TextFile" 2 }
         $chk = Assert-Target $target 0 0 $false ([bool]$Focus)
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
         $text = [IO.File]::ReadAllText($TextFile, [Text.Encoding]::UTF8)
@@ -447,7 +475,26 @@ switch ($Action) {
         if (-not $NoRestoreClip) {
             if ($had) { [Windows.Forms.Clipboard]::SetText($old) } else { [Windows.Forms.Clipboard]::Clear() }
         }
-        Out-WaJson @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); target = (Get-TargetInfo $target); version = $Version }
+        $res = @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); target = (Get-TargetInfo $target); version = $Version }
+        if ($VerifyMode) {
+            $fb = Get-FocusedReadback
+            $want = Normalize-Text $text
+            $got = Normalize-Text $fb.value
+            $matched = $false
+            if ($fb.available) {
+                if ($VerifyMode -eq 'exact') { $matched = ($got -ceq $want) }
+                else { $matched = ($want.Length -gt 0 -and $got.Contains($want)) }
+            }
+            $res.verify = @{ mode = $VerifyMode; available = $fb.available; via = $fb.via; value = $got; expected = $want; matched = $matched; focused = $fb.focused }
+            if (-not $matched) {
+                $res.ok = $false
+                $res.code = 'ENV_TEXT_NOT_ENTERED'
+                $res.msg = 'typed text did not land in the focused element; pass --verify only when the target is UIA-readable'
+                Out-WaJson $res
+                exit 3
+            }
+        }
+        Out-WaJson $res
     }
     default { Fail 'ARG_BAD_ACTION' "unknown action: $Action" 2 }
 }
