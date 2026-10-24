@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # tests/check-m11.sh - M11/T7+T8 acceptance: ops/click-element (semantic act + verify),
 # ops/wait-uia (predicate polling), ops/hover-menu (reach hover-only items).
+# T17 (v1.2) adds N28/N29/N31/N31b: --expect-gone and --expect-alive.
 # Fixtures: uiawnd (named controls, click counter, cycle button) and menutwin (hover-only submenu).
 set -uo pipefail
 cd "$(dirname "$0")/.."
@@ -171,6 +172,47 @@ else
   fail "N27 auto-deepen: hit=$(printf '%s' "$CE27" | jq -c '{ok,deepened}') miss rc=$c27b code=$(printf %s "$CE27b" | jq -r .code)"
 fi
 
+
+# ---- N28/N29/N31: --expect-gone / --expect-alive (T17, C16) ----
+# This block runs before N23 removes the grant.
+bash guard/grant.sh issue --minutes 30 --scope shot,uia,input,file:read --note 'tests/check-m11.sh T17 expect' >/dev/null 2>&1 || true
+CN="$(bin/wuia --hwnd "$UH" --find-name '^CYCLE-' --on-screen --limit 5 2>/dev/null | jq -r '.nodes[0].name // ""')"
+E28="$(ops/click-element --hwnd "$UH" --name "^$CN$" --expect-gone "$CN" --expect-timeout 5000 --yes 2>/dev/null)"; c28=$?
+if [ "$c28" -eq 0 ] && [ "$(printf %s "$E28" | jq -r .expect.gone)" = true ] \
+   && [ "$(printf %s "$E28" | jq -r .waited_ms)" -lt 5000 ]; then
+  pass "N28 --expect-gone: $CN vanished, expect.gone=true waited_ms=$(printf %s "$E28" | jq -r .waited_ms) (C16-1)"
+else
+  fail "N28 --expect-gone: rc=$c28 $(printf %s "$E28" | jq -c '{ok,code,expect,waited_ms}')"
+fi
+# next cycle name: CYCLE-n -> CYCLE-(n+1)
+NN="$(bin/wuia --hwnd "$UH" --find-name '^CYCLE-' --on-screen --limit 5 2>/dev/null | jq -r '.nodes[0].name // ""')"
+E29="$(ops/click-element --hwnd "$UH" --name "^$NN$" --expect-alive '^CYCLE-' --expect-timeout 5000 --yes 2>/dev/null)"; c29=$?
+if [ "$c29" -eq 0 ] && [ "$(printf %s "$E29" | jq -r .expect.alive)" = true ]; then
+  pass "N29 --expect-alive positive (C16-3a)"
+else
+  fail "N29 --expect-alive positive: rc=$c29 $(printf %s "$E29" | jq -c '{code,expect}')"
+fi
+E29b="$(ops/click-element --hwnd "$UH" --name '^CYCLE-' --expect-alive 'NO-SUCH-NODE-XYZ' --expect-timeout 1200 --yes 2>/dev/null)"; c29b=$?
+if [ "$c29b" -eq 3 ] && [ "$(printf %s "$E29b" | jq -r .code)" = "ENV_EXPECT_FAILED" ]; then
+  pass "N29b --expect-alive negative -> ENV_EXPECT_FAILED rc=3 (C16-3b)"
+else
+  fail "N29b --expect-alive negative: rc=$c29b code=$(printf %s "$E29b" | jq -r .code)"
+fi
+E31="$(ops/click-element --hwnd "$UH" --name '^CYCLE-' --expect-gone 'CYCLE' --expect-timeout 1200 --yes 2>/dev/null)"; c31=$?
+if [ "$c31" -eq 3 ] && [ "$(printf %s "$E31" | jq -r .code)" = "ENV_EXPECT_FAILED" ]; then
+  pass "N31 --expect-gone still-present -> ENV_EXPECT_FAILED rc=3 (C16-2)"
+else
+  fail "N31 --expect-gone negative: rc=$c31 code=$(printf %s "$E31" | jq -r .code)"
+fi
+# N31b/N31c: the two expectations are mutually exclusive, and neither mixes with --verify
+ops/click-element --hwnd "$UH" --name '^CYCLE-' --expect-gone A --expect-alive B --yes >/dev/null 2>&1; q1=$?
+ops/click-element --hwnd "$UH" --name '^CYCLE-' --verify alive --expect-gone A --yes >/dev/null 2>&1; q2=$?
+ops/click-element --hwnd "$UH" --name '^CYCLE-' --expect-gone A --expect-timeout abc --yes >/dev/null 2>&1; q3=$?
+if [ "$q1" -eq 2 ] && [ "$q2" -eq 2 ] && [ "$q3" -eq 2 ]; then
+  pass "N31b expect-gone/expect-alive/verify/expect-timeout conflicts rejected rc=2"
+else
+  fail "N31b expect conflicts: $q1/$q2/$q3 (want 2/2/2)"
+fi
 # ---- N23: no grant -> the acting ops are refused with rc=4 ----
 rm -f "$G"
 ops/click-element --hwnd "$UH" --aid wa-btn --yes >/dev/null 2>&1; c23a=$?
