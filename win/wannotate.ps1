@@ -3,6 +3,8 @@ param([Parameter(Mandatory=$true)][string]$Png, [Parameter(Mandatory=$true)][str
 # Input: a TSV file "idx<TAB>x<TAB>y<TAB>w<TAB>h<TAB>actionable" in PNG pixel coordinates.
 # The PNG is read into memory first: Image.FromFile keeps the file locked, so saving back to the
 # same path fails with a generic GDI+ error (K50).
+# Must be first: -File invocations get no PROLOG from winps (K1).
+[Console]::OutputEncoding = [Text.Encoding]::UTF8
 $ErrorActionPreference = 'Stop'
 try {
   Add-Type -AssemblyName System.Drawing | Out-Null
