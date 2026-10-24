@@ -416,10 +416,23 @@ switch ($Action) {
         $chk = Assert-Target $target 0 0 $false ([bool]$Focus)
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
         if ($DryRun) { Out-Plan 'key' @{ combo = $Combo; vks = $vks; hold = $Hold; target = (Get-TargetInfo $target) }; exit 0 }
-        foreach ($vk in $vks) { [WaInput.Native]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 20 }
-        Start-Sleep -Milliseconds $Hold
-        for ($i = $vks.Count - 1; $i -ge 0; $i--) { [WaInput.Native]::keybd_event([byte]$vks[$i], 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 20 }
-        Out-WaJson @{ ok = $true; action = 'key'; injected = $true; combo = $Combo; vks = $vks; hold = $Hold; target = (Get-TargetInfo $target); version = $Version }
+        # K59: keep the modifier HELD across the whole combo. A slow target pumps its message queue
+        # late; by then a too-early Ctrl-up is already in effect and TranslateMessage turns ctrl+a
+        # into a plain 'a' (that is how an extra character appears after 'key ctrl+a'). So: press
+        # modifiers first, dwell at least $HoldMin with the modifier still down, release the normal
+        # keys, then release the modifiers.
+        $mods = @(0x11, 0x12, 0x10, 0x5B, 0x5C)   # ctrl alt shift lwin rwin
+        $holdMs = $Hold
+        if ($holdMs -lt 60) { $holdMs = 60 }
+        $mList = @(); $kList = @()
+        foreach ($vk in $vks) { if ($mods -contains $vk) { $mList += $vk } else { $kList += $vk } }
+        foreach ($vk in $mList) { [WaInput.Native]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 25 }
+        foreach ($vk in $kList) { [WaInput.Native]::keybd_event([byte]$vk, 0, 0, [UIntPtr]::Zero); Start-Sleep -Milliseconds 25 }
+        Start-Sleep -Milliseconds $holdMs
+        for ($i = $kList.Count - 1; $i -ge 0; $i--) { [WaInput.Native]::keybd_event([byte]$kList[$i], 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 25 }
+        if ($kList.Count -gt 0) { Start-Sleep -Milliseconds 30 }
+        for ($i = $mList.Count - 1; $i -ge 0; $i--) { [WaInput.Native]::keybd_event([byte]$mList[$i], 0, 2, [UIntPtr]::Zero); Start-Sleep -Milliseconds 25 }
+        Out-WaJson @{ ok = $true; action = 'key'; injected = $true; combo = $Combo; vks = $vks; hold = $Hold; dwellMs = $holdMs; modifiers = $mList; target = (Get-TargetInfo $target); version = $Version }
     }
     'keydown' {
         if (-not $VkName) { Fail 'ARG_NO_VK' 'keydown needs a key name (e.g. a, shift, f5)' 2 }
@@ -461,6 +474,10 @@ switch ($Action) {
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
         $text = [IO.File]::ReadAllText($TextFile, [Text.Encoding]::UTF8)
         if ($DryRun) { Out-Plan 'type' @{ chars = $text.Length; preview = ($text.Substring(0, [Math]::Min(60, $text.Length))); target = (Get-TargetInfo $target) }; exit 0 }
+        # Snapshot the focused value first, so 'did the paste land' can be judged by a real change
+        # (a longer pre-existing value must not count as landed).
+        $preVal = $null
+        if (-not $NoRestoreClip) { $fbPre = Get-FocusedReadback; if ($fbPre.available) { $preVal = (Normalize-Text $fbPre.value) } }
         $old = ''
         $had = [Windows.Forms.Clipboard]::ContainsText()
         if ($had) { $old = [Windows.Forms.Clipboard]::GetText() }
@@ -471,11 +488,28 @@ switch ($Action) {
         Start-Sleep -Milliseconds 40
         [WaInput.Native]::keybd_event(0x56, 0, 2, [UIntPtr]::Zero)
         [WaInput.Native]::keybd_event(0x11, 0, 2, [UIntPtr]::Zero)
-        Start-Sleep -Milliseconds 200
-        if (-not $NoRestoreClip) {
+        # K57: do not restore the clipboard on a fixed sleep. A busy target can process Ctrl+V later
+        # than the sleep, and would then paste the RESTORED (old) clipboard instead of our text.
+        # Poll the focused element until the paste is visible (or fall back to a settle wait).
+        $wantNorm = Normalize-Text $text
+        $landed = $true
+        $settleMs = 0
+        if ($NoRestoreClip) {
+            Start-Sleep -Milliseconds 120
+        } else {
+            $landed = $false
+            while ($settleMs -lt 900) {
+                $fb0 = Get-FocusedReadback
+                if (-not $fb0.available) { break }
+                $got0 = Normalize-Text $fb0.value
+                if (($wantNorm.Length -gt 0 -and $got0.Contains($wantNorm)) -or ($null -ne $preVal -and $got0 -cne $preVal)) { $landed = $true; break }
+                Start-Sleep -Milliseconds 60
+                $settleMs += 60
+            }
+            if (-not $landed) { Start-Sleep -Milliseconds 250 }
             if ($had) { [Windows.Forms.Clipboard]::SetText($old) } else { [Windows.Forms.Clipboard]::Clear() }
         }
-        $res = @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); target = (Get-TargetInfo $target); version = $Version }
+        $res = @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); pasteSettled = $landed; settleMs = $settleMs; target = (Get-TargetInfo $target); version = $Version }
         if ($VerifyMode) {
             $fb = Get-FocusedReadback
             $want = Normalize-Text $text
