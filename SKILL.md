@@ -1,16 +1,18 @@
 ---
 name: win-admin
 description: >-
-  从 WSL2/DSH 一侧接管 Windows 桌面的操作手册（/root/win-admin 工程，v1.1.0）：
+  从 WSL2/DSH 一侧接管 Windows 桌面的操作手册（/root/win-admin 工程，v1.2.0）：
   只读侦察（wdiag 环境快照、wshot 物理像素截图/区域/窗口/标尺网格、wuia UIA 树与语义查找、wwin 窗口列表/信息/激活/关闭/状态控制）、
   合成输入（winput 点击/输入/按键/长按/悬停/滚轮/拖拽、wclip 剪贴板）、等待（wwait 窗口、wait-for 控件、wait-uia 谓词）、
   元素级动作（wuia --invoke/--select/--toggle/--expand/--set-value）、复合操作（open、find-and-click、fill、click-element、hover-menu、wait-for）、
+  元素地图（ops/map：编号 + 红框图 + 清单）、结果断言（click-element --expect-gone/--expect-alive）、
+  坐标契约（wshot --box/--clip + scale 字段）、输入回读（winput type --verify）、窗口族匹配（--allow-related）、
   以及守卫层（grant.json 限时授权、pause.flag 急停、audit jsonl 逐动作留痕、危险名默认拒绝）。
   当任务需要操作 Windows 图形界面（点击、输入、截图、窗口管理、UIA 自动化）时使用；纯命令行/文件操作不需要它。
 user-invocable: true
 ---
 
-# win-admin：从 WSL 接管 Windows 桌面（v1.1.0）
+# win-admin：从 WSL 接管 Windows 桌面（v1.2.0）
 
 工程根目录固定在 **/root/win-admin**（WSL 内）。所有命令都在该目录下执行：
 
@@ -47,11 +49,11 @@ bash guard/grant.sh revoke
 | 命令 | 用途 | 关键参数 | 成功时关键字段 |
 | --- | --- | --- | --- |
 | `bin/wdiag` | 环境快照 | `--json` | screen w/h、dpi、scale、session、locked、gui_available、payload version |
-| `bin/wshot` | 物理像素截图 | `--out PATH` `--rect X,Y,W,H` `--hwnd H` `--grid N` | path、wsl_path、w、h、bytes、sha256、grid |
+| `bin/wshot` | 物理像素截图 | `--out PATH` `--rect X,Y,W,H` `--box X1,Y1,X2,Y2` `--clip` `--hwnd H` `--grid N` | path、wsl_path、w、h、bytes、sha256、scale、rect、clipped |
 | `bin/wuia` | UIA 树/语义查找/动作 | `--hwnd H --find-name RE --find-type RE --find-aid RE --find-class RE --enabled --on-screen --index N --limit N`；动作 `--invoke/--select/--toggle/--expand/--collapse/--focus/--get-value/--get-text/--set-value TEXT`；`--point X,Y` 问坐标下是什么 | nodes[]（name/type/aid/class/rect/enabled/patterns[]）、动作返回回读状态 |
 | `bin/wwin` | 窗口表/信息/激活/关闭/状态 | `list` `info --hwnd H` `focus --hwnd H` `close --hwnd H` `state --hwnd H` `set --hwnd H [--state max|restore|min|normal] [--x --y --w --h] [--topmost on|off] [--yes]` | windows[]、before/after placement 与 rect |
-| `bin/winput` | 合成输入 | `click X Y` `type --stdin` `type --text-b64` `type --text-file` `key ctrl+s [--hold MS]` `keydown/keyup/releaseall` `hover X Y [--dwell MS]` `wheel --at X Y --delta N` `drag X1 Y1 X2 Y2`，均带 `--expect-hwnd H --yes` | ok、point、injected、`hover` 返回落点元素 |
-| `bin/wclip` | 剪贴板 | `set --text T` `get` | text、bytes |
+| `bin/winput` | 合成输入 | `click X Y` `type --stdin` `type --text-b64` `type --text-file`（WSL/Windows 路径均可）`type --verify [--verify-mode exact|contains]` `key ctrl+s [--hold MS]` `keydown/keyup/releaseall` `hover X Y [--dwell MS]` `wheel --at X Y --delta N` `drag X1 Y1 X2 Y2`，均带 `--expect-hwnd H --yes`，可加 `--allow-related` | ok、point、injected、`hover` 返回落点元素、`verify{}` 回读、`matched` |
+| `bin/wclip` | 剪贴板 | `set --text T` `set --text-file F` `set --native-path P`（`/mnt/c/...` → `C:\...`）`get` | text、bytes |
 | `bin/wwait` | 等窗口出现 | `--title RE --timeout 10` | hwnd、elapsed_ms |
 
 退出码：**0 成功 / 2 参数错 / 3 环境或前置不满足 / 4 守卫拒绝 / 5 执行失败**，`code` 字段是机器可读原因（`ENV_NO_NODE`、`ENV_WINDOW_MISMATCH`、`ENV_STATE_UNCHANGED`、`ENV_NO_PATTERN`、`ENV_TIMEOUT`、`ENV_ELEMENT_NOT_ACTIONABLE`、`ENV_DANGEROUS_ACTION`、`SESSION_LOCKED` 等）。
@@ -62,7 +64,9 @@ bash guard/grant.sh revoke
 ops/open         --exe notepad --args "C:/Users/Public/win-admin/tmp/a.txt" --title "a.txt" --timeout 10 --yes
 ops/find-and-click --hwnd 1234 --name "^保存$" --type Button --yes
 ops/fill         --hwnd 1234 --name "文本编辑器" --text "中文 ok" --yes
-ops/click-element --hwnd 1234 --name "^展开$" [--strategy invoke|click] [--verify value:RE|gone:RE|alive] --yes
+ops/click-element --hwnd 1234 --name "^展开$" [--strategy invoke|click] [--verify value:RE|gone:RE|alive] \
+                 [--expect-gone NAME | --expect-alive NAME] [--expect-timeout MS] [--allow-related] --yes
+ops/map          --hwnd 1234 [--out /tmp/m.png] [--text] [--depth 16] [--min-w 20]
 ops/wait-uia     --hwnd 1234 --name "^发布$" [--enabled] [--value RE] [--gone] --timeout 8000
 ops/hover-menu   --at 640,420 --pick "^二级项$" --dwell 800 --yes
 ops/wait-for     --hwnd 1234 --uia-name "^是否要将更改保存" --timeout 5
@@ -74,12 +78,16 @@ ops/wait-for     --hwnd 1234 --uia-name "^是否要将更改保存" --timeout 5
 - `hover-menu` 是「悬停 → 等菜单项出现（UIA 名字）→ 点它」；菜单项不出现就是 `ENV_MENU_NOT_SHOWN`，不要靠坐标猜。
 - `find-and-click`/`fill`/`click-element` 的 click 分支一定**先 wwin focus 再点**：被遮挡时 winput 的 S7 断言会拒绝点击（`ENV_WINDOW_MISMATCH`），这是设计而非 bug。
 - `fill` 的成功判据是 **readback 与输入逐字符相同**（`matches:true`）；只标 injected 不算成功。
+- **看图和点坐标之间还差一条命令时用 `ops/map`**：它一次 UIA 枚举把「图上的框 + 编号」和「能点的 rect」对上，编号按 (y,x) 阅读顺序，红框=可操作（有 Invoke/Toggle/SelectionItem/ExpandCollapse/Value/RangeValue/ScrollItem 之一），灰框=只能看。`--text` 零截图，只出清单。**只读**：只需 `--scope shot,uia`。
+- `--expect-gone NAME` / `--expect-alive NAME` 把「点完界面该变成什么样」写进命令：不成立即 `ENV_EXPECT_FAILED` rc=3（与 `--verify` 的 `ENV_TIMEOUT` 区分）。两者与 `--verify` 互斥。
+- `--allow-related`：目标与命中窗口互为祖先/后代（典型的「文件名无效」子对话框）才算匹配，成功 JSON 标 `matched:"related"`。**默认关**，默认仍是严格相等。
+- `ops/*` 成功 JSON 都带 `statePreserved:true`：聚焦只改前台，不改窗口的 placement（最大化窗口不会被 `SW_RESTORE` 打回窗口化）。
 
 ## 4. 五步配方（通用任务骨架）
 
 1. **看**：`bin/wshot --out /tmp/s.png`（要看坐标就加 `--grid 100`）读图确认桌面；`bin/wdiag` 确认未锁屏、分辨率与 DPI。
 2. **定窗**：`bin/wwin list`，或用 `ops/wait-for --title`；需要摆位置就 `bin/wwin set --hwnd H --state max --yes`（回读 before/after）。
-3. **定控件**：`bin/wuia --hwnd H --find-name "关键字" --find-type Button --enabled --on-screen`；拿不到再退化为 `--point X,Y` 或截图坐标。
+3. **定控件**：`bin/wuia --hwnd H --find-name "关键字" --find-type Button --enabled --on-screen`；控件没名字/名字重复就 `ops/map --hwnd H`（拿编号清单或红框图），用 `ops/click-element --find-aid` 按编号对应的 aid/name 点；实在没有语义信息才退化为 `--point X,Y` 或截图坐标。
 4. **动**：`ops/click-element`（语义+校验）> `ops/find-and-click` > `bin/winput`（坐标是兜底）。输入文本一律 `--stdin`/`--text-b64`。
 5. **验**：`bin/wuia --get-value/--get-text` 读回、`ops/wait-uia --value RE` 等谓词、再截一张图、或检查落盘文件；不验等于没做。
 
@@ -99,6 +107,11 @@ ops/wait-for     --hwnd 1234 --uia-name "^是否要将更改保存" --timeout 5
 | 坐标差 1.5 倍 | 一律物理像素；payload 首行 `SetProcessDpiAwarenessContext([IntPtr]-4)`，wdiag 的 screen 应与真实分辨率一致 |
 | 文本含 `'`/`"`/`$`/反引号，`type --text` 静默失败 | 走 `--stdin`（推荐）或 `--text-b64`；空文本现在会报 `ARG_EMPTY_TEXT` rc=2（K37） |
 | 下拉框/二级菜单点不开 | 先 `--expand`（UIA ExpandCollapsePattern），或 `ops/hover-menu --pick 项名`；仍不可达就选一级项并在报告里写明 |
+| 点完「成功」但界面没变 / 标签被误删 | 用 `--expect-gone/--expect-alive` 写死预期；chip 增删不要复用上一次坐标，每轮重新 `wuia --find-name` 定位（K49 的口径坑同样适用） |
+| 窗口自己从最大化变回窗口化 | v1.1 的 `Set-WaForeground` 无条件 `SW_RESTORE` 干的（K51）；v1.2 已修，旧脚本若自己写 `ShowWindow(9)` 要删掉 |
+| 按界面代码里的坐标点，差 1.5 倍 | DIP ≠ 物理像素（K53）：150% 缩放差 1.5 倍；坐标只从 UIA `rect` 或 `wwin state` 取 |
+| `--find-name .` 数出来的元素比看见的少 | 名字为空的控件（Edit/ComboBox/容器）不会被 `--find-name` 命中（K49）；数元素用 `--find-type .` |
+| 子对话框里的按钮点不动（`ENV_WINDOW_MISMATCH`） | 它是目标的子/父窗口：加 `--allow-related`；报错 JSON 的 `hit` 会告出「挡在前面的是谁」 |
 
 ## 6. 什么时候应该拒绝
 
@@ -145,17 +158,19 @@ mission **不是**新的授权通道——守卫层照旧（grant/pause/audit）
 
 1. **窗口先摆好**：`wwin set --hwnd H --state max --yes`，别再写 PowerShell 调 ShowWindow。
 2. **标题/简介用安全通道**：`bin/winput type --stdin <<'TXT' … TXT`；含半角单引号的标题一律不要走 `--text`。
-3. **上传文件对话框**：`wclip set --text "C:/绝对路径"` → `winput key ctrl+v` → `enter`（原生对话框只吃粘贴，不吃 type）。
-4. **平台默认标签**：先逐个删（选中 + `Delete`），再加自己的（输入 + `Enter`）；删完用 `wuia --get-text` 或截图确认。
+3. **上传文件对话框**：`wclip set --native-path "C:/绝对路径"`（自动转反斜杠，原生对话框只认 `\`）→ `winput key ctrl+v` → `enter`（原生对话框只吃粘贴，不吃 type）。若弹「文件名无效」，先看是不是缺了 `--native-path`。
+4. **平台默认标签**：先逐个删（选中 + `Delete`），再加自己的（输入 + `Enter`）；每删一个都重新定位、并带 `--expect-gone <标签名>` 断言它真的没了（不要复用上一次坐标，chip 会漂移）。
 5. **分区/分类下拉**：`wwin` 摆好窗口后用截图定位一级项（`--grid 100` 读坐标），能 `--expand` 就走 UIA；
    **二级 hover 菜单在 Chromium 里可能不进 UIA 树**：`ops/hover-menu --at X,Y --pick RE` 不行就只选一级项，并在报告里写明「二级不可达」，不要用坐标硬猜（c0 会话在这里耗了 300+ 行）。
 6. **提交前**：截图 + `wuia --get-text` 核对标题/分区/封面，再点「立即投稿」；投稿后用进度页 URL 取 BV 号作为证据。
 
-## 10. 已知局限（v1.1.0）
+## 10. 已知局限（v1.2.0）
 
 - 单次原语经 `winps` 桥约 600–750 ms，别一步一调，能合并的用 `ops/`。
 - 前台锁：Windows 可能拒绝后台进程抢焦点，发键前必须确认前台窗口。
 - ~~Edge 的 UIA 树只有 ~53 个节点，页面内容读不到~~（**v1.1.0 已纠正**：那是默认深度 10 的观测；depth 16 下整页正文与页面内按钮都可读可点，见 `docs/18`）。
 - `wuia` 的 `--get-text` 对 WPF `TextBlock` 回落到 `Name`（无 TextPattern，K38）。
 - Chromium 的二级 hover 菜单不保证进 UIA 树：`hover-menu` 失败即 `ENV_MENU_NOT_SHOWN`，属环境限制不属 bug。
+- `ops/map` 的编号只在同一次调用内稳定：界面变了就重新 `map`，别跨图复用 idx。
+- `type --verify` 依赖焦点的 Value/Text pattern：Chromium 的 `contenteditable` 富文本读不到会报 `ENV_TEXT_UNVERIFIABLE`（只在校验模式下报，不影响普通 type）。
 - 审计账本同用户可改（K22），真隔离未做。

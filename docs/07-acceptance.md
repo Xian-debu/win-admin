@@ -242,6 +242,53 @@
 - 实测：m10 K7/L7、m11 N24/N24b/N28 全部 rc=4 `GUARD_NO_GRANT`（无 grant 时，含 `--dry-run` 也要 grant）；`audit/` 每次尝试留一条（含拒绝）；危险名拒绝见 C11 行。
 - 状态：✅ 通过（2026-10-24）
 
+### E13 · 状态无副作用
+
+- **判据**：聚焦/复合操作**只准改前台**，不准改 placement。最大化窗口 `wwin focus` 后仍 `maximized:true`、`showCmd==3`、rect 逐值不变；最小化窗口 `wwin focus` 后回到最小化前的状态；`ops/*` 成功 JSON 含 `statePreserved:true`。
+- 实测：m13 N1 最大化窗口 focus 后 `state=maximized`、`showCmd=3`、rect 未变；N2 `rectNormal` 逐值不变；N3 最小化窗口 focus 后回到**最大化**（最小化前的状态，不是 naive 的 normal——docs/20 E13-2 原写 normal，实测修正）；N4 `ops/click-element` 与 N5 `ops/hover-menu` 成功 JSON 带 `statePreserved:true`；N6 普通窗 focus 后 `state=normal` 且未移动。
+- 状态：✅ 通过（2026-10-24）
+
+### E14 · 输入可回读
+
+- **判据**：`type --text-file` 接受 WSL 路径；`--verify` 能回答「文本真的进去了吗」；读不到 / 读到空 / 校验不符三种失败各有独立错误码，不混用。
+- 实测：m14 10/0 —— N1 WSL 路径 `/tmp/x.txt` 落字逐字节一致；N2 `--verify` **exact** 经 ValuePattern 回读 `matched:true`；N3 `contains` 通过；N4 回读不符 → rc=3 `ENV_TEXT_NOT_ENTERED`（JSON 带回读值）；N5 路径不存在 → rc=2 `ARG_TEXT_FILE_NOT_FOUND`（msg 含路径）；N6 空文件 → rc=2 `ARG_EMPTY_TEXT`（与缺文件可区分）；N7/N8 坏 `--verify-mode` 与非 type 动作带 `--verify` → rc=2；N9 `wclip --native-path` 把 `/mnt/c/a/b` 转成 `C:\a\b`；N10 Windows 风格 `--text-file` 仍可用；N11 `--native-path` 与 `--text/--text-file` 混用 → rc=2。
+- 状态：✅ 通过（2026-10-24）
+
+### E15 · 定位可信
+
+- **判据**：`wshot --box` 的图与参数一一对应（尺寸 = 右下−左上），JSON 带 `scale`；越界给可执行建议；`--rect` 形态错误报 `ARG_BAD_RECT` 而不是静默；`ops/map` 能把「看得见的控件」变成「点得中的编号+坐标」，编号稳定。
+- 实测：m12 20/0 —— N30 `--box` 换算一致；N31 `rect`/`image`/`clipped` 自洽；N32 `scale=1.5`（= dpi 144/96）；N33 越界 msg 同时含 `--clip` 与 `--box` 两条建议；N34 `--clip` 把 400×300 裁成 160×100 且 `requested` 回显；N35 完全越界 rc=2；N36 空格分隔坐标 rc=2 `ARG_BAD_RECT`；N37 反向 box（右下<左上）rc=2；N38 `--rect`+`--box` 互斥 rc=2。m15 8/0 —— N1 `--text` 列出 21 个节点；N2 编号 0..n-1 严格按 (y,x) 排序；N3 `actionable` 与独立 `wuia --find-type . --enabled --on-screen` 口径差 0（**docs/20 E15-4 原写 `--find-name .`，实测 Edit/ComboBox 名字为空会漏算，判据改为 `--find-type .`**）；N4 PNG 尺寸 == 窗口 rect 780×930；N5 与干净截图 diff 4.36%；N6 `--text` 不新增截图；N7 只签 `shot,uia` 时 map 可用而 `winput click` rc=4；N8 参数契约 rc=2。
+- 状态：✅ 通过（2026-10-24）
+
+### C14 · 窗口族
+
+- **判据**：子对话框（Owner/父子关系）默认仍严格匹配（`ENV_WINDOW_MISMATCH`），带 `--allow-related` 时视为同族并标 `matched:"related"`；无关窗口即便带开关也仍 mismatch，且报错带「挡在前面的是谁」。
+- 实测：m13 13/0 —— N7 子对话框默认 rc=3 `ENV_WINDOW_MISMATCH`；N7b msg 含 `--allow-related` 提示与双向 hit 描述；N8 dry-run `matched:"related"`；N9 真实点击落地（夹具事件计数 +1）；N10 无关窗带 flag 仍 mismatch；N11 前台是子窗、`--expect-hwnd` 给父窗 + flag → ok；N12 `ops/click-element` 透传 flag。
+- 状态：✅ 通过（2026-10-24）
+
+### C15 · wshot 契约
+
+- **判据**：`--box`/`--rect` 互斥、`--hwnd` 与几何参数互斥、`scale == screen.dpi/96`（±0.01）。
+- 实测：m12 N38 互斥 rc=2；m12 N32 `scale` 与 `dpi/96` 一致；N24 `--hwnd` 与 `--grid` 组合仍工作。
+- 状态：✅ 通过（2026-10-24）
+
+### C16 · 结果断言
+
+- **判据**：点击后界面该变成什么样，写进命令：`--expect-gone NAME` 在目标消失后返回 `ok:true` + `expect.gone:true` + `waited_ms`；仍在 → `ENV_EXPECT_FAILED` rc=3；`--expect-alive` 正反两例；与 `--verify` 不得混用。
+- 实测：m11 19/0 —— N28 `--expect-gone CYCLE-3` → ok `waited_ms=648 < 5000`；N29 `--expect-alive '^CYCLE-'` ok；N29b `--expect-alive NO-SUCH-NODE-XYZ` → rc=3 `ENV_EXPECT_FAILED`；N31 目标仍在时 `--expect-gone CYCLE` → rc=3 `ENV_EXPECT_FAILED`；N31b gone+alive、`--verify`+expect、坏 `--expect-timeout` 三种冲突 rc=2。
+- 状态：✅ 通过（2026-10-24）
+
+### S10 · 默认行为不变
+
+- **判据**：不传新开关时，`winput` 的匹配/校验行为、`wshot --rect` 语义、`ops/*` 输出（除新增字段）与 v1.1.0 一致。
+- 实测：m1–m12 全部原判据在 v1.2 上仍全绿（m1 16/0 skip=15、m2 11/0、m3 20/0、m4 13/0、m5 6/0、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0）；`--allow-related`、`--verify`、`--expect-*` 全部**默认关**，C14-2/N7 专门断言默认严格不变。
+- 状态：✅ 通过（2026-10-24）
+
+### S11 · 只读边界
+
+- **判据**：`ops/map` 只需 `scope=shot,uia`；`--text` 模式不产生截图文件。
+- 实测：m15 N7 只签 `shot,uia` 时 map `ok:true`、同环境下 `winput click` rc=4 `GUARD_NO_GRANT`；N6 `--text` 前后 `shots/` 条目数不变。
+- 状态：✅ 通过（2026-10-24）
 ## 里程碑 × 判据对照
 
 | 里程碑 | 必须通过的判据 | 门槛 |
@@ -254,6 +301,7 @@
   单次入口 `bash tests/check-m5.sh`；报告 `tests/reports/2026-10-21-m5.md`） |
 
 | **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0（skip=15：C3 最小化窗口 + 14 条非本里程碑占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
+| **M10 v1.2** | E13–E15 + C14–C16 + S10–S11 + E1–E12 回归 | ✅ 2026-10-24 冻结 v1.2.0（m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、release pass=yes；报告 `tests/reports/2026-10-24-m9.md`） |
 | **M9 网页语义** | 覆盖率报告（UIA 文本 / CDP innerText / 剪贴板基线） | 只出结论，不改主链路 |
 
 ## 验收记录规范

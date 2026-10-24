@@ -148,3 +148,22 @@ v1.0 的四条绕路（窗口最大化写 PowerShell、悬停菜单靠坐标猜�
 - Chromium 的二级 hover 菜单不保证进 UIA 树：`hover-menu` 失败即 `ENV_MENU_NOT_SHOWN`，此时只选一级项并在交付报告写明。
 - Chromium 的 a11y 树是**异步**长出来的：刚出窗口时只有 chrome（279 节点/707 名字字符），稍后才是 318 节点/1051 字符且含页面内容——读网页要用 `ops/wait-uia` 轮询，别一次性 find（`docs/18`）。
 - 读网页正文**不需要 CDP**：CDP 只快 13 倍（0.11 s vs 1.50 s），但要求调试端口，而用户真实 Edge 没开——重启它属红线。CDP 只用于 cdp-hub 自起的受管一次性实例。
+
+## 9 · v1.2 语义层补强（T12–T17）
+
+| 能力 | 可用 | 判据（实测） | 验收 |
+|---|---|---|---|
+| 焦点不改状态 `wwin focus` / `ops/*` | ✅ | 最大化窗口 focus 前后 `showCmd=3`、rect 逐值不变；最小化窗口回到最小化前状态；成功 JSON `statePreserved:true` | m13 N1–N6 |
+| 窗口族匹配 `--allow-related` | ✅ | 子对话框默认 mismatch，带 flag 点击落地并标 `matched:"related"`；无关窗带 flag 仍 mismatch 且报错带 hit 描述 | m13 N7–N12 |
+| 输入可回读 `type --verify` | ✅ | WSL/Windows/相对路径都可；`exact`/`contains` 两模式；读不到/空/不符三码分离 | m14 N1–N11 |
+| 原生路径 `wclip set --native-path` | ✅ | `/mnt/c/a/b` → `C:\a\b`，与 `--text/--text-file` 互斥 | m14 N9/N11 |
+| 坐标契约 `wshot --box/--clip` | ✅ | `--box` 尺寸=右下−左上；越界提示含两条改法；`scale=1.5`；形态错误 `ARG_BAD_RECT` | m12 N30–N38 |
+| 元素地图 `ops/map` | ✅ | 一次 UIA dump 出编号清单 + 红框图；编号按 (y,x) 稳定；`--text` 零截图；只需 `shot,uia` | m15 N1–N8 |
+| 结果断言 `--expect-gone/--expect-alive` | ✅ | 消失/出现各自 ok + `waited_ms`；不成立 → `ENV_EXPECT_FAILED`；与 `--verify` 冲突 rc=2 | m11 N28–N31b |
+
+新增硬限制：
+
+- **`SW_RESTORE` 会改窗口状态**（K51）：凡是「只想把窗口提到前台」的代码，都不许无条件调 `ShowWindow(9)`；判据是 `IsIconic` + `GetWindowPlacement().showCmd`。
+- **数元素用 `--find-type .`**（K49）：`--find-name .` 会漏掉无名控件（Edit/ComboBox），拿它做覆盖率会少算。
+- **DIP ≠ 物理像素**（K53）：150% 缩放下差 1.5 倍；坐标一律取 UIA `rect` 或 `wwin state`，不要用界面代码里的 DIP。
+- **`ops/map` 的编号只在同一次调用内稳定**：界面变化后要重新 `map`，不要跨截图复用 idx。

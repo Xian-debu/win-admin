@@ -3,6 +3,36 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [1.2.0] - 2026-10-24
+
+主题：**把「命令有了」推进到「命令可信」**。依据 `session-4f961713`（v1.1.0 的第一次实战：B 站投稿）逐条取证（`docs/19`：8 条反馈 → 6 个缺口 G1–G6），按 `docs/20` 的冻结判据实施 T12–T19。
+
+### Added
+- `wwin`/`ops/*` 的**状态无副作用**保证：聚焦只改前台，不改 placement；`Set-WaForeground` 只在窗口最小化时才 `SW_RESTORE`，最大化窗口 focus 后仍是最大化（判据 `GetWindowPlacement().showCmd`）。复合操作成功 JSON 增 `statePreserved:true`。
+- `winput --allow-related` 与全部注入类 ops 的同名开关：目标与命中窗口互为祖先/后代（「文件名无效」这类子对话框）时放行并标 `matched:"related"`；mismatch 的 JSON 增 `hit:{hwnd,title,class,pid,rect}`，msg 直接说出「挡在前面的是谁」。**默认关**，默认仍严格相等。
+- `winput type --verify [--verify-mode exact|contains]`：动作后读焦点元素的 Value/Text pattern 回读比对，不符 `ENV_TEXT_NOT_ENTERED` rc=3、读不到 `ENV_TEXT_UNVERIFIABLE` rc=3；JSON 带 `verify{focused,hwnd,value,matched,mode}`。`--text-file` 现在接受 WSL 路径/相对路径（bash 侧读入并转存），路径不存在 `ARG_TEXT_FILE_NOT_FOUND` 与内容为空 `ARG_EMPTY_TEXT` **分开报**。
+- `wclip set --native-path`：`/mnt/c/a/b` → `C:\a\b`，原生文件对话框的斜杠问题不再靠记（与 `--text/--text-file` 互斥）。
+- `wshot --box X1,Y1,X2,Y2`（左上/右下）与 `--clip`（越界裁剪）；JSON 增 `scale`（dpi/96，本机 1.5）、`rect`、`image{w,h}`、`requested`、`clipped`；越界 msg 附 `--clip` 与 `--box` 两条改法；`--rect` 形态错误改报 `ARG_BAD_RECT` rc=2（不再静默 `unknown arg`）。
+- `ops/map`：一次 UIA 枚举给出「编号 + 能点的 rect + 可操作性」清单，并可选在截图上画红框编号图（`win/wannotate.ps1`）——把「看图猜坐标」变成「按编号点」。只读，只需 `--scope shot,uia`；`--text` 零截图。
+- `ops/click-element --expect-gone NAME | --expect-alive NAME [--expect-timeout MS]`：把「点完界面该变成什么样」写进命令，不成立 `ENV_EXPECT_FAILED` rc=3，成功 JSON 增 `expect{gone|alive|value,waited_ms}` 与 `waited_ms`。
+- 新夹具 `tests/helpers/dialogwin.ps1`（主窗 + Owner 子对话框 + 无关窗）；验收 `check-m13.sh`（13 项）、`check-m14.sh`（10 项）、`check-m15.sh`（8 项）。判据 E13–E15 / C14–C16 / S10–S11 追加进 `docs/07`。
+- `docs/19`（4f 会话取证）、`docs/20`（v1.2 计划 + 判据 + §0.1 实施中对判据的修正）。
+
+### Changed
+- `tests/check-m11.sh` 扩到 19 项（N28–N31b）、`tests/check-m12.sh` 扩到 20 项（N30–N38）。
+- `SKILL.md` → v1.2.0：`ops/map` 用法、`--expect-*` 配方、`--allow-related` 边界、`--native-path`、「看图点坐标」三条新坑。
+- `docs/11` 增 K49–K56（`--find-name .` 漏空名、GDI+ 锁图、`SW_RESTORE` 改状态、WPF Owner 赋值顺序、DIP≠物理像素、`grep -c || echo 0`、长脚本生成、`old_string` 缩进）。
+- `docs/04` 增 §9「v1.2 语义层补强」；`docs/17` 顶部指向 `docs/20`。
+
+### Fixed
+- **窗口自己从最大化变回窗口化**：`Set-WaForeground` 无条件 `ShowWindow(SW_RESTORE)`，对最大化窗口等于「还原」（K51）。4f 会话里两次 `hover-menu` 失败后坐标全失效就是它干的。
+- `type --text-file` 传 WSL 路径报 `ARG_EMPTY_TEXT`（读不到与空内容混为一谈）。
+- `ops/map`/`wannotate` 首版 `Image.FromFile` 锁图导致 `Save` 报 GDI+ 一般性错误（K50）。
+
+### Measured
+- m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、`check-release.sh` pass=yes。
+- 状态保全实测：最大化窗口 focus 前后 `showCmd=3`、rect 逐值不变；`--expect-gone CYCLE-3` 648 ms 返回；`ops/map` 在 780×930 夹具上 21 节点 / 9 可操作 / 编号 0..20 严格按 (y,x)。
+- 报告：`tests/reports/2026-10-24-m9.md`。
 ## [1.1.0] - 2026-10-24
 
 主题：**把 v1.0.0 的绕路变成一条命令**。依据三份真实会话取证（`docs/16`），逐条对照实施（`docs/17`）：T1–T9 落地，T10 文档/契约/发布，T11 网页语义实验见 `docs/18`。
