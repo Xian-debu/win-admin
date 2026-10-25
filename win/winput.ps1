@@ -21,7 +21,9 @@ param(
     [switch]$Focus,
     [switch]$AllowRelated,
     [string]$VerifyMode = '',
-    [switch]$NoRestoreClip
+    [switch]$NoRestoreClip,
+    [string]$ExpectChange = '',
+    [int]$TimeoutMs = 2000
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $env:WA_VERSION = $Version
@@ -291,6 +293,30 @@ function Normalize-Text([string]$t) {
     return ($t -replace "`r`n", "`n").TrimEnd()
 }
 
+# T22 (E18): a click is only worth reporting as "done" if the screen proves it. --expect-change
+# names the observable(s) that must differ after the click (title|rect, comma separated); the wait
+# is a poll because the UI thread may translate the input a few frames late.
+function Test-SnapChanged($a, $b) {
+    foreach ($k in $a.Keys) {
+        $va = $a[$k] | ConvertTo-Json -Compress -Depth 6
+        $vb = $b[$k] | ConvertTo-Json -Compress -Depth 6
+        if ($va -ne $vb) { return $true }
+    }
+    return $false
+}
+
+function Get-ChangeSnapshot([string]$spec, [IntPtr]$h) {
+    $want = @($spec -split ',' | ForEach-Object { $_.Trim().ToLower() } | Where-Object { $_ -ne '' })
+    $o = [ordered]@{}
+    if ($want.Count -eq 0) { return $o }
+    $w = Get-WaWindowInfo $h
+    foreach ($k in $want) {
+        if ($k -eq 'title') { $o['title'] = [string]$w.title }
+        elseif ($k -eq 'rect') { $o['rect'] = $w.rect }
+    }
+    return $o
+}
+
 switch ($Action) {
     'move' {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
@@ -306,6 +332,9 @@ switch ($Action) {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
         if ($DryRun) { Out-Plan 'click' @{ point = @{ x = $X; y = $Y }; button = $Button; count = $Count; matched = $chk.matched; target = (Get-TargetInfo $target) }; exit 0 }
+        $chgSpec = $ExpectChange.Trim().ToLower()
+        $chgBefore = $null
+        if ($chgSpec -ne '') { $chgBefore = Get-ChangeSnapshot $chgSpec $target }
         $down = 0x02; $up = 0x04
         if ($Button -eq 'right') { $down = 0x08; $up = 0x10 }
         elseif ($Button -eq 'middle') { $down = 0x20; $up = 0x40 }
@@ -320,7 +349,30 @@ switch ($Action) {
         $p = New-Object WaInput.Native+POINT
         [WaInput.Native]::GetCursorPos([ref]$p) | Out-Null
         $fg = Get-Root ([WaInput.Native]::GetForegroundWindow())
-        Out-WaJson @{ ok = $true; action = 'click'; injected = $true; matched = $chk.matched; button = $Button; count = $Count; point = @{ x = $p.X; y = $p.Y }; target = (Get-TargetInfo $target); foreground = (Get-TargetInfo $fg); version = $Version }
+        $res = @{ ok = $true; action = 'click'; injected = $true; matched = $chk.matched; button = $Button; count = $Count; point = @{ x = $p.X; y = $p.Y }; target = (Get-TargetInfo $target); foreground = (Get-TargetInfo $fg); version = $Version }
+        if ($chgSpec -ne '') {
+            $sw = [Diagnostics.Stopwatch]::StartNew()
+            $chgAfter = Get-ChangeSnapshot $chgSpec $target
+            $changed = Test-SnapChanged $chgBefore $chgAfter
+            while (-not $changed -and $sw.ElapsedMilliseconds -lt $TimeoutMs) {
+                Start-Sleep -Milliseconds 80
+                $chgAfter = Get-ChangeSnapshot $chgSpec $target
+                $changed = Test-SnapChanged $chgBefore $chgAfter
+            }
+            $elapsed = [int]$sw.ElapsedMilliseconds
+            if (-not $changed) {
+                # Not Fail(): the caller needs the evidence (before/after/observed) to see that the
+                # click landed on something inert, not that the click could not be delivered.
+                Out-WaJson @{ ok = $false; code = 'ENV_NO_EFFECT'; action = 'click'; injected = $true; msg = ("no change in '" + $chgSpec + "' within " + $elapsed + " ms after click"); changed = $false; elapsedMs = $elapsed; before = $chgBefore; after = $chgAfter; observed = $chgAfter; point = @{ x = $p.X; y = $p.Y }; target = (Get-TargetInfo $target); version = $Version }
+                exit 3
+            }
+            $res['changed'] = $true
+            $res['before'] = $chgBefore
+            $res['after'] = $chgAfter
+            $res['observed'] = $chgAfter
+            $res['elapsedMs'] = $elapsed
+        }
+        Out-WaJson $res
     }
     'dclick' {
         $chk = Assert-Target $target $X $Y $true ([bool]$Focus)

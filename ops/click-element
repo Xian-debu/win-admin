@@ -18,7 +18,9 @@ usage: ops/click-element (--hwnd H | --title REGEX) [--name RE] [--type RE] [--a
                         [--expect-gone NAME] [--expect-alive NAME] [--expect-timeout MS]
                         [--timeout MS] [--interval MS] [--allow-danger] [--yes]
   --name/--type/--aid/--class   find criteria (at least one)
-  --strategy   invoke (UIA, no cursor) or click (rect center); default: auto
+  --strategy   invoke (UIA, no cursor) or click/coords (rect center); default: auto
+               coords clicks verify the element under the point first: if another control is
+               there, the action is refused with ENV_HIT_MISMATCH rc=3 (E18-4)
   --verify     value:RE  the element's value/text must match RE after the action
                gone:RE   no element matching RE may exist after the action (dialog closed)
                alive     default: the same find criteria still resolve to a node
@@ -71,7 +73,10 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-case "$STRATEGY" in invoke|click|auto) ;; *) echo '--strategy must be invoke|click|auto' >&2; exit 2 ;; esac
+case "$STRATEGY" in invoke|click|coords|auto) ;; *) echo '--strategy must be invoke|click|coords|auto' >&2; exit 2 ;; esac
+# T22: a coordinate click is reported as strategy "coords" (what it does), not "click" (the verb);
+# the old spelling stays accepted so v1.1 callers keep working.
+case "$STRATEGY" in click) STRATEGY=coords ;; esac
 # T17: --expect-gone/--expect-alive are sugar over the same verification loop, not a second
 # mechanism. At most one expectation may be stated, and --verify cannot be mixed with them.
 if [ -n "$EXPECT_GONE" ] && [ -n "$EXPECT_ALIVE" ]; then echo '--expect-gone and --expect-alive are mutually exclusive' >&2; exit 2; fi
@@ -115,7 +120,7 @@ fi
 
 HASINV="$(printf '%s' "$NODE" | jq -r 'if (.patterns | index("Invoke")) then 1 else 0 end')"
 if [ "$STRATEGY" = auto ]; then
-  if [ "$DOUBLE" -eq 1 ]; then STRATEGY=click; elif [ "$HASINV" = 1 ]; then STRATEGY=invoke; else STRATEGY=click; fi
+  if [ "$DOUBLE" -eq 1 ]; then STRATEGY=coords; elif [ "$HASINV" = 1 ]; then STRATEGY=invoke; else STRATEGY=coords; fi
 fi
 CX="$(printf '%s' "$NODE" | jq -r '((.rect.x + .rect.w/2) | floor)') "
 CY="$(printf '%s' "$NODE" | jq -r '((.rect.y + .rect.h/2) | floor)') "
@@ -142,6 +147,39 @@ if [ "$ALLOW_DANGER" -eq 0 ] && printf '%s' "$NODENAME" | grep -qiE "$DANGER_RE"
   exit 3
 fi
 
+
+# T22 (E18-4): a coordinate click must prove the point belongs to this node before injecting.
+# The camera answer (UIA FromPoint) sees whatever is on top, including another window; the warm-tree
+# rect hit would only see our own tree. Use the camera answer when it exists, treat a container as
+# "cannot tell" (Chromium answers Document/RootWebArea for page points), and accept descendants or
+# ancestors (a Button's centre is often its inner TextBlock).
+HIT_JSON="null"; HIT_REASON=""
+if [ "$STRATEGY" = coords ]; then
+  HJ="$(bash "$REPO_DIR/bin/wuia" --point "$CX,$CY" 2>/dev/null || true)"
+  UNDER="$(printf '%s' "$HJ" | jq -c '.under // empty' 2>/dev/null)"
+  if [ -n "$UNDER" ]; then
+    HIT_JSON="$UNDER"
+    MIS="$(jq -nc --argjson n "$NODE" --argjson u "$UNDER" --arg hh "$(printf '0x%x' "$H")" --argjson rel "$RELATED" '
+      def inside($a; $b; $t):
+        ($a.x >= ($b.x - $t)) and ($a.y >= ($b.y - $t))
+        and (($a.x + $a.w) <= ($b.x + $b.w + $t)) and (($a.y + $a.h) <= ($b.y + $b.h + $t));
+      if (($u.hwnd != null) and ($u.hwnd != $hh) and ($rel == 0)) then true
+      elif ((["Window","Document","Pane","Group","Custom"] | index($u.type)) != null) then false
+      elif ($u.type == $n.type and ($u.name // "") == ($n.name // "") and $u.rect == $n.rect) then false
+      elif inside($u.rect; $n.rect; 2) then false
+      elif inside($n.rect; $u.rect; 2) then false
+      else true end')"
+    if [ "$MIS" = "true" ]; then
+      WA_AUDIT_RESULT=ENV_HIT_MISMATCH
+      jq -nc --argjson h "$H" --argjson n "$NODE" --argjson u "$UNDER" --argjson x "$CX" --argjson y "$CY" --arg s "$STRATEGY" \
+        '{ok:false,code:"ENV_HIT_MISMATCH",msg:"the click point hits a different control; refusing to inject",hwnd:$h,node:$n,hit:$u,point:{x:$x,y:$y},strategy:$s}'
+      exit 3
+    fi
+  else
+    HIT_REASON="$(printf '%s' "$HJ" | jq -r '.code // "point resolved to no element"' 2>/dev/null)"
+    [ -n "$HIT_REASON" ] || HIT_REASON="point resolved to no element"
+  fi
+fi
 
 op_pause_gate input
 ACTION=""
@@ -214,7 +252,8 @@ if [ "$state" != ok ]; then
   if [ "$EXPECT" -eq 1 ]; then WA_AUDIT_RESULT=ENV_EXPECT_FAILED; else WA_AUDIT_RESULT=ENV_TIMEOUT; fi
   jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" \
     --argjson t "$TIMEOUT" --arg a "$ACTION" --arg c "$WA_AUDIT_RESULT" --argjson w "$(($(date +%s%3N) - T0))" \
-    '{ok:false,code:$c,msg:("verification " + $v + " did not hold within " + ($t|tostring) + " ms"),hwnd:$h,node:$n,strategy:$s,action:$a,waited_ms:$w,verify:$v}'
+    --argjson hit "$HIT_JSON" --arg hr "$HIT_REASON" \
+    '{ok:false,code:$c,msg:("verification " + $v + " did not hold within " + ($t|tostring) + " ms"),hwnd:$h,node:$n,strategy:$s,action:$a,waited_ms:$w,verify:$v,hit:$hit,hitReason:(if $hr=="" then null else $hr end)}'
   exit 3
 fi
 
@@ -228,6 +267,6 @@ EXPECT_J="$(printf '%s' "$VERIFY" | jq -Rc --argjson w "$WAITED" '
   else {alive:true,waited_ms:$w} end')"
 jq -nc --argjson h "$H" --argjson n "$NODE" --arg s "$STRATEGY" --arg v "$VERIFY" --arg a "$ACTION" \
   --argjson aj "$AJ" --argjson d "$detail" --argjson x "$CX" --argjson y "$CY" --argjson dp "$DEEPENED" \
-  --argjson w "$WAITED" --argjson e "$EXPECT_J" \
-  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj,deepened:($dp==1),statePreserved:true,waited_ms:$w,expect:$e}'
+  --argjson w "$WAITED" --argjson e "$EXPECT_J" --argjson hit "$HIT_JSON" --arg hr "$HIT_REASON" \
+  '{ok:true,injected:true,tool:"ops/click-element",hwnd:$h,node:$n,strategy:$s,action:$a,point:{x:$x,y:$y},verify:$v,verdict:$d,result:$aj,deepened:($dp==1),statePreserved:true,waited_ms:$w,expect:$e,hit:$hit,hitReason:(if $hr=="" then null else $hr end)}'
 exit 0

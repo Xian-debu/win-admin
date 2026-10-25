@@ -152,13 +152,45 @@ function Test-WaActionable($view) {
     return $false
 }
 
+# T22 (E18-4): owning top-level window of an element. NativeWindowHandle is only set on some
+# nodes (often the root), so walk up until a node reports one. 0 = cannot tell (web content).
+function Get-WaRootHwnd($el) {
+    $p = $el
+    for ($i = 0; $i -lt 16 -and $p; $i++) {
+        $nh = 0
+        try { $nh = $p.Current.NativeWindowHandle } catch { $nh = 0 }
+        if ($nh -ne 0) { return [int64]$nh }
+        try { $p = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { break }
+    }
+    return 0
+}
+
 function New-WaUnder($el, [string]$via) {
     $v = Get-NodeView $el 0
     if (-not $v) { return $null }
+    # T22 (E18-4): the owning top-level window disambiguates "our own ancestor" from "another
+    # window covering this point". Chromium reports 0 for web content, so null means "cannot tell".
+    $nh = Get-WaRootHwnd $el
+    # T22 (E18-1): a click at a TextBlock's centre lands on the TextBlock, but the control the user
+    # means is the clickable ancestor (the Button). Report both: under is the literal answer, clickable
+    # is the node a click would actually act on.
+    $click = $null
+    if (-not (Test-WaActionable $v)) {
+        # Get-WaClickableAncestor already returns a view (an ordered hashtable), not an element.
+        $ca = Get-WaClickableAncestor $el
+        if ($ca) {
+            $click = [ordered]@{
+                name = $ca.name; type = $ca.type; aid = $ca.aid; class = $ca.class
+                rect = $ca.rect; depth = $ca.depth; actionable = $true
+            }
+        }
+    }
     return [ordered]@{
         name = $v.name; type = $v.type; aid = $v.aid; class = $v.class
         rect = $v.rect; depth = $v.depth; via = $via
+        hwnd = $(if ($nh -ne 0) { ('0x' + ([int64]$nh).ToString('x')) } else { $null })
         actionable = (Test-WaActionable $v)
+        clickable = $click
     }
 }
 
@@ -169,7 +201,7 @@ function Get-WaClickableAncestor($el) {
     while ($p -and $d -le 10) {
         $v = Get-NodeView $p $d
         if ($v -and (Test-WaActionable $v)) {
-            return [ordered]@{ name = $v.name; type = $v.type; aid = $v.aid; rect = $v.rect; depth = $v.depth }
+            return [ordered]@{ name = $v.name; type = $v.type; aid = $v.aid; class = $v.class; rect = $v.rect; depth = $v.depth }
         }
         $next = $null
         try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }

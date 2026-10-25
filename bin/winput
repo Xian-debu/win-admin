@@ -14,6 +14,11 @@ usage:
                               click the center of the Nth text line whose name matches RE,
                               resolved through "wuia --find-text"; the JSON gains hit:{name,rect,...}
                               (T21: text -> geometry -> point, never a blind coordinate).
+  winput click X Y [--expect-change title|rect[,..]] [--timeout MS]
+                              click, then prove the window actually changed (ENV_NO_EFFECT rc=3).
+                              Every click reports hit (object, or null + hitReason); every
+                              hover/wheel reports under from the warm tree (raw camera answer
+                              kept as underUia).
   winput dclick X Y
   winput drag X1 Y1 X2 Y2 [--steps N]
   winput wheel [X Y | --at X,Y] [--delta N] [--times N] [--horizontal]
@@ -48,6 +53,7 @@ ACTION=""; X=""; Y=""; X2=""; Y2=""; BUTTON="left"; COUNT=1; STEPS=20
 DELTA=120; TIMES=1; HORIZ=0; DWELL=600; AT=""
 COMBO=""; HOLD=20; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0; ALLOW_RELATED=0; VERIFY_MODE=""
 TEXT_SET=0; B64=""; USE_STDIN=0; CLICK_TEXT=""; TIDX=0; HIT_JSON=""
+EXPECT_CHANGE=""; TMO=2000; UNDER_JSON=""; HIT_REASON=""
 HELD_FILE="$APP_ROOT/tmp/held.json"
 
 [ $# -gt 0 ] || { WA_AUDIT_RESULT=ARG_NO_ARGS; usage >&2; exit 2; }
@@ -80,6 +86,8 @@ while [ $# -gt 0 ]; do
     --verify) VERIFY_MODE="$2"; shift 2 ;;
     --click-text) CLICK_TEXT="$2"; shift 2 ;;
     --text-index) TIDX="$2"; shift 2 ;;
+    --expect-change) EXPECT_CHANGE="$2"; shift 2 ;;
+    --timeout) TMO="$2"; shift 2 ;;
     -*) WA_AUDIT_RESULT=ARG_UNKNOWN_FLAG; echo "unknown flag: $1" >&2; exit 2 ;;
     *) pos+=("$1"); shift ;;
   esac
@@ -127,6 +135,22 @@ case "$ACTION" in
   *) WA_AUDIT_RESULT=ARG_BAD_ACTION; echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
 esac
 
+# T22 (E18): --expect-change turns "I injected a click" into "the screen changed". Only observable
+# fields that this tool can read without the target app's cooperation are allowed.
+if [ -n "$EXPECT_CHANGE" ]; then
+  [ "$ACTION" = click ] || { WA_AUDIT_RESULT=ARG_BAD_CHANGE; echo "--expect-change only applies to click" >&2; exit 2; }
+  case "$EXPECT_CHANGE" in *[!a-z,]*|''|,*|*,) WA_AUDIT_RESULT=ARG_BAD_CHANGE; echo "--expect-change takes title and/or rect, comma separated" >&2; exit 2 ;; esac
+  _oc="$IFS"; IFS=,
+  for _tok in $EXPECT_CHANGE; do
+    case "$_tok" in title|rect) ;; *) IFS="$_oc"; WA_AUDIT_RESULT=ARG_BAD_CHANGE; echo "unknown --expect-change field: $_tok (title|rect)" >&2; exit 2 ;; esac
+  done
+  IFS="$_oc"
+fi
+case "$TMO" in ''|*[!0-9]*) WA_AUDIT_RESULT=ARG_BAD_TIMEOUT; echo "--timeout must be a number of ms" >&2; exit 2 ;; esac
+if [ "$TMO" -lt 100 ] || [ "$TMO" -gt 60000 ]; then
+  WA_AUDIT_RESULT=ARG_BAD_TIMEOUT; echo "--timeout must be between 100 and 60000 ms" >&2; exit 2
+fi
+
 # T21: text -> geometry -> point. wuia is read-only, so resolving a line needs no grant; the click
 # itself still goes through the input gate below (see: never click blind).
 if [ -n "$CLICK_TEXT" ]; then
@@ -165,6 +189,22 @@ if [ -n "$CLICK_TEXT" ]; then
   HIT_JSON="$(bash "$REPO_DIR/bin/wuia" --hwnd "$HWND" --point "$X,$Y" 2>/dev/null | jq -c '.under' 2>/dev/null)"
   [ -n "$HIT_JSON" ] || HIT_JSON="null"
 fi
+
+# T22: what is under the point, BEFORE injecting. Resolution is read-only (wuia tree walk), so it
+# needs no grant; doing it first means a click that changes the UI can still report its target.
+if [ -z "$HIT_JSON" ] && [ "$HWND" != "0" ]; then
+  case "$ACTION" in
+    click|dclick|wheel|hover)
+      hj="$(bash "$REPO_DIR/bin/wuia" --hwnd "$HWND" --point "$X,$Y" 2>/dev/null)"
+      HIT_JSON="$(printf '%s' "$hj" | jq -c '.under // empty' 2>/dev/null)"
+      if [ -z "$HIT_JSON" ]; then
+        HIT_JSON="null"
+        HIT_REASON="$(printf '%s' "$hj" | jq -r '.code // "point resolved to no element"' 2>/dev/null)"
+        [ -n "$HIT_REASON" ] || HIT_REASON="point resolved to no element"
+      fi ;;
+  esac
+fi
+if [ "$ACTION" = hover ] || [ "$ACTION" = wheel ]; then UNDER_JSON="$HIT_JSON"; fi
 
 if [ -n "$VERIFY_MODE" ] && [ "$ACTION" != type ]; then
   WA_AUDIT_RESULT=ARG_BAD_VERIFY; echo '--verify only applies to type' >&2; exit 2
@@ -245,6 +285,7 @@ if [ "$ACTION" = "wheel" ]; then
 fi
 [ "$ACTION" = "hover" ] && args+=(-Steps "$STEPS" -Dwell "$DWELL")
 [ "$HWND" != "0" ] && args+=(-ExpectHwnd "$HWND")
+[ -n "$EXPECT_CHANGE" ] && args+=(-ExpectChange "$EXPECT_CHANGE" -TimeoutMs "$TMO")
 [ "$FOCUS" -eq 1 ] && args+=(-Focus)
 [ "$ALLOW_RELATED" -eq 1 ] && args+=(-AllowRelated)
 [ "$NOCLIP" -eq 1 ] && args+=(-NoRestoreClip)
@@ -277,9 +318,29 @@ if [ -z "$j" ]; then
   wa_err_json EXEC_FAIL "no JSON from payload (see stderr)"
   exit 5
 fi
-if [ -n "$HIT_JSON" ]; then
-  j="$(printf '%s' "$j" | jq -c --argjson hit "$HIT_JSON" '. + {hit: $hit}' 2>/dev/null || printf '%s' "$j")"
-fi
+# T22: click always carries hit (object, or null + hitReason); hover/wheel always carry under,
+# with the raw UIA camera answer kept in underUia for diagnosis (E18-5: Chromium's FromPoint gives
+# Window/RootWebArea for page points, the warm-tree rect hit is the useful answer).
+case "$ACTION" in
+  click|dclick)
+    if [ -n "$HIT_JSON" ]; then
+      # E18-1: a click at a control's centre usually lands on an inner TextBlock. Report the clickable
+      # ancestor as hit (that is the control a click acts on) and keep the literal element in hit.raw.
+      j="$(printf '%s' "$j" | jq -c --argjson hit "$HIT_JSON" '
+        . + {hit: (
+          if ($hit | type) != "object" then $hit
+          elif ($hit.actionable // false) then $hit
+          elif (($hit.clickable // null) != null) then (($hit.clickable) + {raw: $hit})
+          else $hit end)}' 2>/dev/null || printf '%s' "$j")"
+      if [ -n "$HIT_REASON" ]; then
+        j="$(printf '%s' "$j" | jq -c --arg r "$HIT_REASON" '. + {hitReason: $r}' 2>/dev/null || printf '%s' "$j")"
+      fi
+    fi ;;
+  hover|wheel)
+    if [ -n "$UNDER_JSON" ]; then
+      j="$(printf '%s' "$j" | jq -c --argjson u "$UNDER_JSON" '. + {underUia: (.under // null), under: $u}' 2>/dev/null || printf '%s' "$j")"
+    fi ;;
+esac
 printf '%s\n' "$j"
 if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
   if [ "$REAL" -eq 1 ]; then WA_AUDIT_RESULT=ok; else WA_AUDIT_RESULT=dryrun; fi
