@@ -5,7 +5,7 @@ set -uo pipefail
 . "$(dirname "$0")/../lib/audit.sh"
 wa_audit_init wuia "$@"
 
-LIST=0; HWND=""; TITLE=""; DEPTH=3; MAX=400; FILTER=""; VALUE=0
+LIST=0; HWND=""; TITLE=""; DEPTH=""; MAX=""; FILTER=""; VALUE=0; NOWARM=0; NODEEP=0; WMS=""; WPS=""
 FNAME=""; FTYPE=""; FAID=""; FCLASS=""; FENABLED=0; FONSCREEN=0; INDEX=0; LIMIT=20
 PX=""; PY=""; ACT=""; SETV=""; SETV_GIVEN=0
 while [ $# -gt 0 ]; do
@@ -22,6 +22,9 @@ usage:
   wuia (--hwnd H | --title RE) --find-name RE [--find-type RE] [--find-aid RE] [--find-class RE]
        [--enabled] [--on-screen] [--index N] [--limit N] [--depth N] [--max N]
        returns {total, count, nodes:[{name,type,aid,class,rect,enabled,offscreen,patterns[]}]}
+       T20: find/action default --depth 20 (tree stays 3); an empty result deepens once to 28
+       (deepened:true) and the walk is retried after 250 ms while Chromium builds its a11y tree
+       (passes/warmMs/depthUsed in the JSON). Escape hatches: --no-warm / --no-deepen.
 
   act (T6), always combined with find criteria:
   wuia (--hwnd H | --title RE) --find-name RE [--index N] ACTION
@@ -37,6 +40,10 @@ EOF
     --title) TITLE="$2"; shift 2 ;;
     --depth) DEPTH="$2"; shift 2 ;;
     --max) MAX="$2"; shift 2 ;;
+    --no-warm) NOWARM=1; shift ;;
+    --no-deepen) NODEEP=1; shift ;;
+    --warm-ms) WMS="$2"; shift 2 ;;
+    --warm-passes) WPS="$2"; shift 2 ;;
     --filter) FILTER="$2"; shift 2 ;;
     --value) VALUE=1; shift ;;
     --find-name) FNAME="$2"; shift 2 ;;
@@ -79,7 +86,13 @@ if [ -n "$ACT" ]; then
   fi
 fi
 
-args=(wuia -Version "$VERSION" -Depth "$DEPTH" -MaxNodes "$MAX" -Limit "$LIMIT" -Index "$INDEX")
+args=(wuia -Version "$VERSION" -Limit "$LIMIT" -Index "$INDEX")
+[ -n "$DEPTH" ] && args+=(-Depth "$DEPTH")
+[ -n "$MAX" ] && args+=(-MaxNodes "$MAX")
+[ "$NOWARM" = 1 ] && args+=(-NoWarm)
+[ "$NODEEP" = 1 ] && args+=(-NoDeepen)
+[ -n "$WMS" ] && args+=(-WarmMs "$WMS")
+[ -n "$WPS" ] && args+=(-WarmPasses "$WPS")
 [ "$LIST" = 1 ] && args+=(-List)
 [ -n "$HWND" ] && args+=(-Hwnd "$((HWND))")
 [ -n "$TITLE" ] && args+=(-Title "$TITLE")

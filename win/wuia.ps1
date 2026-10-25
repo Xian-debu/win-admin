@@ -10,8 +10,8 @@ param(
     [string]$Version = 'unknown',
     [switch]$List,
     [long]$Hwnd = 0,
-    [int]$Depth = 3,
-    [int]$MaxNodes = 400,
+    [int]$Depth = -1,
+    [int]$MaxNodes = -1,
     [string]$Filter = '',
     [string]$Title = '',
     [switch]$Value,
@@ -29,7 +29,12 @@ param(
     # ---- T6: acting ----
     [string]$Action = '',
     [string]$SetValue = '',
-    [switch]$SetValueGiven
+    [switch]$SetValueGiven,
+    # ---- T20: tree reliability (v1.3) ----
+    [switch]$NoWarm,
+    [switch]$NoDeepen,
+    [int]$WarmMs = 250,
+    [int]$WarmPasses = 3
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $env:WA_VERSION = $Version
@@ -242,28 +247,75 @@ try {
     }
 
     # ---- bounded walk: collects (element, view) pairs; the caller decides what to do with them ----
+    #
+    # T20 (v1.3): Chromium builds its accessibility tree lazily and every CLI call is a fresh
+    # process, so the FIRST walk returns only browser chrome (279 nodes on bilibili.com) while the
+    # immediate second one returns the page (561 nodes, depth 13-25). Callers therefore saw
+    # "the page DOM never enters the UIA tree". We warm the tree at most WarmPasses times and, for
+    # find/action, deepen the walk once when the first pass found nothing (docs/21 F2, docs/22 T20).
     $script:cols = New-Object System.Collections.ArrayList
     $script:truncated = $false
     $re = if ($Filter) { [regex]$Filter } else { $null }
     $findMode = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly -or $Action)
-    $maxDepth = if ($findMode) { [Math]::Max($Depth, 12) } else { $Depth }
+    if ($Depth -ge 0) { $depthGiven = $true; $baseDepth = $Depth } else { $depthGiven = $false; $baseDepth = if ($findMode) { 20 } else { 3 } }
+    $script:nodeCap = if ($MaxNodes -ge 1) { $MaxNodes } elseif ($findMode) { 4000 } else { 400 }
 
-    function Add-WaNode($e, $d) {
-        if ($script:cols.Count -ge $MaxNodes) { $script:truncated = $true; return }
+    function Invoke-WaWalk($rootEl) {
+        $script:cols = New-Object System.Collections.ArrayList
+        $script:truncated = $false
+        $script:emptyDoc = $false
+        Walk-WaNode $rootEl 0
+    }
+
+    function Walk-WaNode($e, $d) {
+        if ($script:cols.Count -ge $script:nodeCap) { $script:truncated = $true; return }
         $view = Get-NodeView $e $d
         if ($view -and (-not $re -or ($view.name -match $re))) {
             [void]$script:cols.Add(@{ el = $e; view = $view })
         }
-        if ($d -ge $maxDepth) { return }
-        $child = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetFirstChild($e)
+        $child = $null
+        if ($d -lt $script:walkDepth) {
+            $child = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetFirstChild($e)
+        }
+        if ($view -and $view.type -eq 'ControlType.Document' -and -not $child) { $script:emptyDoc = $true }
         while ($child) {
-            Add-WaNode $child ($d + 1)
+            Walk-WaNode $child ($d + 1)
             if ($script:truncated) { return }
             $child = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetNextSibling($child)
         }
     }
 
-    Add-WaNode $rootEl 0
+    $warmStart = Get-Date
+    $passes = 0
+    $warmRetries = 0
+    $deepened = $false
+    $depthUsed = $baseDepth
+    while ($true) {
+        $passes = $passes + 1
+        $script:walkDepth = $depthUsed
+        Invoke-WaWalk $rootEl
+        if ($findMode) {
+            $hitCount = 0
+            foreach ($c in $script:cols) { if (Test-WaMatch $c.view) { $hitCount = $hitCount + 1 } }
+            $needMore = $hitCount -eq 0
+        } else {
+            $needMore = $script:emptyDoc
+        }
+        if (-not $needMore) { break }
+        if ($findMode -and -not $deepened -and -not $NoDeepen -and $depthUsed -lt 28) {
+            $depthUsed = [Math]::Max($depthUsed + 8, 28)
+            if (-not $depthGiven) { $depthUsed = 28 }
+            $deepened = $true
+            continue
+        }
+        if (-not $NoWarm -and $passes -lt $WarmPasses) {
+            Start-Sleep -Milliseconds $WarmMs
+            $warmRetries = $warmRetries + 1
+            continue
+        }
+        break
+    }
+    $warmMs = [int]((Get-Date) - $warmStart).TotalMilliseconds
 
     # ---- T5: find (only when no action was asked for; an action always wins) ----
     if (-not $Action -and ($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly)) {
@@ -284,6 +336,11 @@ try {
             query     = [ordered]@{ name = $FindName; type = $FindType; aid = $FindAid; class = $FindClass; enabled = [bool]$EnabledOnly; onScreen = [bool]$OnScreenOnly }
             scanned   = $script:cols.Count
             truncated = $script:truncated
+            passes    = $passes
+            warmMs    = $warmMs
+            warmRetries = $warmRetries
+            depthUsed = $depthUsed
+            deepened  = $deepened
             total     = $hits.Count
             count     = $out.Count
             nodes     = $out
@@ -299,10 +356,15 @@ try {
             ok        = $true
             mode      = 'tree'
             hwnd      = ('0x{0:x}' -f $Hwnd)
-            depth     = $Depth
-            maxNodes  = $MaxNodes
+            depth     = $depthUsed
+            depthUsed = $depthUsed
+            maxNodes  = $script:nodeCap
             count     = $nodes.Count
             truncated = $script:truncated
+            passes    = $passes
+            warmMs    = $warmMs
+            warmRetries = $warmRetries
+            deepened  = $deepened
             nodes     = $nodes
         })
         exit 0
@@ -320,6 +382,10 @@ try {
         Write-Fail2 'ENV_NO_MATCH' 'no element matches the find criteria' ([ordered]@{
             query = [ordered]@{ name = $FindName; type = $FindType; aid = $FindAid; class = $FindClass }
             scanned = $script:cols.Count
+            passes = $passes
+            warmMs = $warmMs
+            depthUsed = $depthUsed
+            deepened = $deepened
         }) 3
     }
     if ($Index -lt 0 -or $Index -ge $hits.Count) {
