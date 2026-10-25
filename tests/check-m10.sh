@@ -62,9 +62,11 @@ else
 fi
 
 # ---- F4: find by class name reaches the TextBox by its WPF class ----
-F4="$(bin/wuia --hwnd "$H" --find-class TextBox)"
+# --find-class is a regex, so bare "TextBox" also matches "RichTextBox" (the wa-ro read-only
+# editor added in v1.3). Anchor it; the unanchored behaviour is documented in K71.
+F4="$(bin/wuia --hwnd "$H" --find-class '^TextBox$')"
 if printf '%s' "$F4" | jq -e '.total == 1 and .nodes[0].aid == "wa-edit"' >/dev/null 2>&1; then
-  pass "F4 find by class TextBox -> wa-edit"
+  pass "F4 find by class ^TextBox$ -> wa-edit"
 else
   fail "F4 find class: $(printf '%s' "$F4" | head -c 200)"
 fi

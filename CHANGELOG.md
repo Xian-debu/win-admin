@@ -3,6 +3,40 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [1.3.0] - 2026-10-25
+
+主题：**把「能点」推进到「知道点到了什么」**。依据 `session-c022d2c2`（v1.2.0 的第一次实战：B 站投稿草稿）的 7 条取证（`docs/21`），按 `docs/22` 的冻结判据实施 T20–T26。
+
+### Added
+- **点击有回报**：每次 `winput click` 在注入**之前**用几何反查落点元素的 `hit{name,type,aid,class,rect,depth,actionable,hwnd,clickable,raw}`；未命中给 `hit:null` + `hitReason`。语义是「a11y 认为这里是什么」，不是像素断言。
+- **点击有后果断言**：`click --expect-change title|rect [--timeout MS]` 轮询读窗口状态，超时给 `ENV_NO_EFFECT` rc=3 并附 `before/after/observed/elapsedMs`（不是静默 ok）。
+- **按文本点**：`wuia --find-text RE` 给出「文本行 + rect + depth」清单（按 y 升序）；`winput click --click-text RE [--text-index N]` 直接点第 N 行的中心。
+- **几何命中**：`wuia --point X,Y --point-mode auto|rect|uia` —— FromPoint 命中容器或空时，用暖树做 rect-hit 回退，`via` 明确写 `uia-point` 或 `rect-hit`；空白点 `ENV_NO_HIT` rc=3。
+- **正文一条命令**：`ops/read-text --hwnd|--title [--no-fallback|--force-clip]`，UIA TextPattern 优先、剪贴板兜底并还原，`source:"uia"|"clip"`。真实 Edge 一次取回 156–173 KB。
+- **输入落点契约**：`type` 出现焦点不可编辑 → `ENV_NO_FOCUS`（`injected:false`，附 `focused`/`reason`）；粘贴未落地 → `ENV_NO_EFFECT`（`pasteSettled:false`）；`--force` 是显式逃生口并回显 `forced:true`。
+- `wuia` 冷暖树策略：默认 depth find 20 / tree 3，落空自动加深到 28 并短暂重试，输出 `passes/warmMs/warmRetries/depthUsed/deepened`；`--no-warm/--no-deepen/--warm-ms/--warm-passes` 可关。
+- `wshot --out` 接受 WSL 路径（`/tmp/x.png`），非 `/mnt` 目标自动中转并回显 `mapped`/`windows_tmp`/`wsl_path`；`wwin focus --yes` 接受多余 `--yes` 并标 `ignoredFlags`。
+- 新夹具 `tests/helpers/deepwin.ps1`（22 层 + `-Lazy` 深树）与 `tests/helpers/uiawnd.ps1` 增只读编辑器 `wa-ro`；验收 `check-m16.sh`–`check-m21.sh`；判据 E16–E18 / C17–C19 追加进 `docs/07`；`docs/21`（c022 取证）、`docs/22`（计划与冻结判据）。
+
+### Changed
+- `ops/click-element` 坐标路径在注入前做 hit-test：落点属于别的窗口 → `ENV_HIT_MISMATCH` rc=3 且不注入；`--strategy click` 归一为 `coords`。
+- `wuia` 的 `--point` 现在区分「legacy 无目标」与「带 `--hwnd/--title` 的几何命中」；`hover/wheel` 额外回原始 `underUia`。
+- `SKILL.md` → v1.3.0（`--find-text/--read-text/--click-text/--expect-change`、命中语义、坑表 6 行）；`docs/04` 增 §10；`docs/11` 增 K62–K70。
+
+### Fixed
+- **冷进程首查只拿到 chrome**：Chromium 的 a11y 树异步生长，v1.2 的首查 279 节点里没有页面内容，用户以为「工具读不到网页」——现在默认预热+自动加深（`K62`/`K63`/`K64`）。
+- **点完不知道点到哪**：v1.2 只会 `ok:true`，实战里三次点空全靠人肉核对截图。
+- **真实正文取不回来**：`--arg` 传 156 KB 文本撞 `ARG_MAX`，`--argjson 0x…` 直接解析失败（K69）。
+- **焦点不对也往上打**：v1.2 的 `type` 只看 `hwnd` 匹配，落在按钮/只读框上仍报成功（K66 类），现在先判焦点（K65 收口）。
+- `wwin focus` 偶发 `ENV_NOT_FOREGROUND` 的真因是探针控制台抢前台（K67），不是目标窗口拒绝。
+
+### Measured
+- m16 10/0（1 SKIP live）、m17 10/0（1 SKIP live）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（1 SKIP：活动标签非 B 站）。
+- 真实 Edge（`0x90cdc`）：冷进程首查 542 节点 / depth 20 / 1545 ms；`ops/read-text` 173067 字符；`--find-text . --limit 120` total=174 / 几何 120 行 / 2743 ms；暖树 `--find-name .` 2162 ms。
+- `click --expect-change title` 实测 50–64 ms 内判定改标题；点空白 1000 ms 超时 `ENV_NO_EFFECT`（elapsedMs 1086）。
+- 全表回归：m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、m16 10/0（skip=1）、m17 10/0（skip=1）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（skip=1）、`check-release.sh` pass=yes；共 **242 条断言通过 / 0 失败 / 18 SKIP**（回归首轮曾 4 个套件红：release 的 UTF-8 窗口不足、hover `under` 契约被破坏、`--find-class` 正则误命中、两条旧断言撞上新焦点门；修法与判据修正见 `tests/reports/2026-10-25-v1.3.md` §4 与 `docs/22` §5.1 第 18–20 条）。
+- 报告：`tests/reports/2026-10-25-v1.3.md`（含 m16–m21 分报告）。
+
 ## [1.2.0] - 2026-10-24
 
 主题：**把「命令有了」推进到「命令可信」**。依据 `session-4f961713`（v1.1.0 的第一次实战：B 站投稿）逐条取证（`docs/19`：8 条反馈 → 6 个缺口 G1–G6），按 `docs/20` 的冻结判据实施 T12–T19。

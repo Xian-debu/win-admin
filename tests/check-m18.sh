@@ -92,12 +92,13 @@ fi
 
 # N4 (E18-5) hover reports the warm-tree element under the cursor, not the window shell
 J5="$(bash bin/winput hover "$DCX" "$DCY" --expect-hwnd "$H" --yes 2>/dev/null)"; RC5=$?
-UT="$(num "$J5" under.type)"; UN="$(num "$J5" under.name)"
-HAS_RAW="$(printf '%s' "$J5" | jq -r 'has("underUia")')"
-if [ "$RC5" -eq 0 ] && [ -n "$UN" ] && contains "$J5" '.under.rect' "$DCX" "$DCY" && [ "$UT" != "ControlType.Window" ] && [ "$UT" != "ControlType.Document" ] && [ "$HAS_RAW" = "true" ]; then
-  ok "N4 hover under='$UN' ($UT) contains the point, raw answer kept as underUia"
+UT="$(num "$J5" underNode.type)"; UN="$(num "$J5" underNode.name)"
+HAS_NODE="$(printf '%s' "$J5" | jq -r 'has("underNode")')"
+HAS_COMPAT="$(printf '%s' "$J5" | jq -r '(.under.window != null and .under.element != null)')"
+if [ "$RC5" -eq 0 ] && [ -n "$UN" ] && contains "$J5" '.underNode.rect' "$DCX" "$DCY" && [ "$UT" != "ControlType.Window" ] && [ "$UT" != "ControlType.Document" ] && [ "$HAS_NODE" = "true" ] && [ "$HAS_COMPAT" = "true" ]; then
+  ok "N4 hover underNode='$UN' ($UT) contains the point; v1.2 under{window,element} kept"
 else
-  bad "N4 hover under" "rc=$RC5 under=$UN/$UT $(diag "$J5")"
+  bad "N4 hover underNode" "rc=$RC5 node=$UN/$UT compat=$HAS_COMPAT $(diag "$J5")"
 fi
 
 # N5 (E18-4a) a node without Invoke (a TextBlock) is clicked by coordinates and says so

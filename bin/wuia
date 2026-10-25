@@ -38,7 +38,8 @@ usage:
        returns {total, count, nodes:[{name,type,aid,class,rect,enabled,offscreen,patterns[]}]}
        T20: find/action default --depth 20 (tree stays 3); an empty result deepens once to 28
        (deepened:true) and the walk is retried after 250 ms while Chromium builds its a11y tree
-       (passes/warmMs/depthUsed in the JSON). Escape hatches: --no-warm / --no-deepen.
+       (passes/warmMs/warmRetries/depthUsed in the JSON). Tuning: --warm-ms MS (default 250),
+       --warm-passes N (default 3). Escape hatches: --no-warm / --no-deepen.
 
   act (T6), always combined with find criteria:
   wuia (--hwnd H | --title RE) --find-name RE [--index N] ACTION

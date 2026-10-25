@@ -17,8 +17,8 @@ usage:
   winput click X Y [--expect-change title|rect[,..]] [--timeout MS]
                               click, then prove the window actually changed (ENV_NO_EFFECT rc=3).
                               Every click reports hit (object, or null + hitReason); every
-                              hover/wheel reports under from the warm tree (raw camera answer
-                              kept as underUia).
+                              hover/wheel keeps its v1.2 under{window,element} and adds
+                              underNode (warm-tree rect hit: name/type/rect/via).
   winput dclick X Y
   winput drag X1 Y1 X2 Y2 [--steps N]
   winput wheel [X Y | --at X,Y] [--delta N] [--times N] [--horizontal]
@@ -325,9 +325,9 @@ if [ -z "$j" ]; then
   wa_err_json EXEC_FAIL "no JSON from payload (see stderr)"
   exit 5
 fi
-# T22: click always carries hit (object, or null + hitReason); hover/wheel always carry under,
-# with the raw UIA camera answer kept in underUia for diagnosis (E18-5: Chromium's FromPoint gives
-# Window/RootWebArea for page points, the warm-tree rect hit is the useful answer).
+# T22: click always carries hit (object, or null + hitReason); hover/wheel keep their v1.2
+# under{window,element} (m7 asserts it) and add underNode for the warm-tree rect hit (E18-5:
+# Chromium's FromPoint gives Window/RootWebArea for page points, the warm-tree hit is the useful one).
 case "$ACTION" in
   click|dclick)
     if [ -n "$HIT_JSON" ]; then
@@ -345,7 +345,7 @@ case "$ACTION" in
     fi ;;
   hover|wheel)
     if [ -n "$UNDER_JSON" ]; then
-      j="$(printf '%s' "$j" | jq -c --argjson u "$UNDER_JSON" '. + {underUia: (.under // null), under: $u}' 2>/dev/null || printf '%s' "$j")"
+      j="$(printf '%s' "$j" | jq -c --argjson u "$UNDER_JSON" '. + {underNode: $u}' 2>/dev/null || printf '%s' "$j")"
     fi ;;
 esac
 printf '%s\n' "$j"

@@ -260,6 +260,23 @@
 - 实测：m12 20/0 —— N30 `--box` 换算一致；N31 `rect`/`image`/`clipped` 自洽；N32 `scale=1.5`（= dpi 144/96）；N33 越界 msg 同时含 `--clip` 与 `--box` 两条建议；N34 `--clip` 把 400×300 裁成 160×100 且 `requested` 回显；N35 完全越界 rc=2；N36 空格分隔坐标 rc=2 `ARG_BAD_RECT`；N37 反向 box（右下<左上）rc=2；N38 `--rect`+`--box` 互斥 rc=2。m15 8/0 —— N1 `--text` 列出 21 个节点；N2 编号 0..n-1 严格按 (y,x) 排序；N3 `actionable` 与独立 `wuia --find-type . --enabled --on-screen` 口径差 0（**docs/20 E15-4 原写 `--find-name .`，实测 Edit/ComboBox 名字为空会漏算，判据改为 `--find-type .`**）；N4 PNG 尺寸 == 窗口 rect 780×930；N5 与干净截图 diff 4.36%；N6 `--text` 不新增截图；N7 只签 `shot,uia` 时 map 可用而 `winput click` rc=4；N8 参数契约 rc=2。
 - 状态：✅ 通过（2026-10-24）
 
+### E16 · 树可靠性（v1.3）
+
+- **判据**：冷进程首查（不传 `--depth/--max`）能拿到深树；JSON 带 `passes`（1..3，加深也算一次，故可能为 2）、`warmMs`、`depthUsed`、`warmRetries`、`deepened`；`--no-warm` 时 `warmRetries==0`；显式 `--depth 12` 查 depth 23 元素 → 落空后自动加深（`deepened:true`、`total>=1`），`--no-deepen` 时 `total==0`；暖树整树 ≤ 5 s。
+- 实测：m16 10/0（N11 live SKIP，当时无 Edge 窗口）—— N1 不传 depth `--find-name '^深层按钮$'` → total=2；N2 `passes=2`、`depthUsed=28`、`warmRetries=0`、`warmMs=541`；N3 `--no-warm` → `warmRetries=0`；N4 命中元素 depth=23 ≤ depthUsed；N5 `--depth 12` → `deepened:true`、total=1；N6 `--depth 12 --no-deepen` → total=0、passes=3；N7 暖树 find 1236 ms；N8 tree `count=58`、depth=depthUsed=40；N9 lazy 4000 + `--warm-passes 12 --warm-ms 300` → total=2、passes=12、warmRetries=10、warmMs=3543；N10 lazy 8000 `--no-warm` → total=0。真实 Chromium（用户 Edge）冷进程首查 542 节点 / depth 20。
+- 状态：✅ 通过（2026-10-25）
+
+### E17 · 文本行与几何命中（v1.3）
+
+- **判据**：`--find-text RE` 返回 ≥1 行（含 text/rect/depth、rect 为正、按 y 升序）；无匹配给诚实的空答案（total=0、ok:true）；`--point` 在页面文本中心 → `under` 非 null 且 rect 含点，FromPoint 直命 `via:'uia-point'`、几何回退 `via:'rect-hit'`；空白点 → rc=3 `ENV_NO_HIT`；`winput click --click-text` 点击后目标自报被点（夹具为窗口标题变化）。
+- 实测：m17 10/0（1 SKIP）—— `--find-text '深层按钮'` total=2（Button + 内部 TextBlock，刻意不去重）；`--find-text '第.条文本'` count=3、y 单调递增；无匹配 total=0 rc=0；文本中心 (825,696) → `via:'uia-point'`、`under.rect={660,674,330,45}` 含点；`--point-mode rect` → `via:'rect-hit'`、depthUsed=28；空白 (1464,1494) → rc=3 `ENV_NO_HIT`；`--click-text` → `hit.name="深层按钮"`、窗口标题 → `clicked:deep-btn`；无 grant 时 `--find-text` rc=0 而 `click --click-text` rc=4；`--point-mode nope` rc=2、缺 `--expect-hwnd` rc=2。
+- 状态：✅ 通过（2026-10-25）
+
+### E18 · 点击闭环（v1.3）
+
+- **判据**：`click --expect-change title --timeout 3000` 命中改标题控件 → ok/changed、before/after.title 不同、`hit.actionable:true`；点空白同参数 → rc=3 `ENV_NO_EFFECT`（含 hit/elapsedMs/observed）；每次 click 都带 `hit`（未命中 null + `hitReason`）；`ops/click-element` 坐标路径先 hit-test，落点属于别的窗口 → rc=3 `ENV_HIT_MISMATCH` 且不注入；`--strategy click` 与 coords 等价。
+- 实测：m18 10/0 —— 标题 `wa-deep` → `clicked:deep-btn`、`elapsedMs=50`、`hit.name="深层按钮"`、`hit.raw` 保留叶节点；空白点 `--timeout 1000` → rc=3、`elapsedMs=1086`、`hit:null`、`hitReason:"ENV_NO_HIT"`；uiawnd 盖住落点后 `underNode.hwnd` ≠ 目标 → `ENV_HIT_MISMATCH`；`hover` 保留 v1.2 的 `under{window,element}` 并新增 `underNode`（暖树命中，rect 含点）；`--strategy bogus`/`--expect-change color`/`--timeout 50`/hover 带 expect 均 rc=2；无 grant rc=4；dry-run `dryRun:true` 且仍带 hit。
+- 状态：✅ 通过（2026-10-25）
 ### C14 · 窗口族
 
 - **判据**：子对话框（Owner/父子关系）默认仍严格匹配（`ENV_WINDOW_MISMATCH`），带 `--allow-related` 时视为同族并标 `matched:"related"`；无关窗口即便带开关也仍 mismatch，且报错带「挡在前面的是谁」。
@@ -278,6 +295,23 @@
 - 实测：m11 19/0 —— N28 `--expect-gone CYCLE-3` → ok `waited_ms=648 < 5000`；N29 `--expect-alive '^CYCLE-'` ok；N29b `--expect-alive NO-SUCH-NODE-XYZ` → rc=3 `ENV_EXPECT_FAILED`；N31 目标仍在时 `--expect-gone CYCLE` → rc=3 `ENV_EXPECT_FAILED`；N31b gone+alive、`--verify`+expect、坏 `--expect-timeout` 三种冲突 rc=2。
 - 状态：✅ 通过（2026-10-24）
 
+### C17 · 输入落点（v1.3）
+
+- **判据**：焦点不可编辑 → rc=3 `ENV_NO_FOCUS` 且 `injected:false`；可读但值没变 → rc=3 `ENV_NO_EFFECT`（before==after、`pasteSettled:false`）；`--force` 越过两者并如实标 `forced:true`；`--verify` 与 `--force` 独立（forced 下 verify 仍报 `ENV_TEXT_NOT_ENTERED`）；dry-run 不跑焦点门；无 grant 仍 rc=4。
+- 实测：m19 10/0 —— focus Button（`wa-btn`）→ `ENV_NO_FOCUS`、`focused.aid="wa-btn"`；只读编辑器（`wa-ro`）→ `ENV_NO_EFFECT`、before==after==`"\nreadonly"`、settleMs=900；`--force` → ok + `forced:true` + `pasteSettled:false`；可编辑 `wa-edit` 输入 hello → `pasteSettled:true`、值 hello、settleMs=0；`--verify exact` → `matched:true`；forced + verify → `ENV_TEXT_NOT_ENTERED`；dry-run → `dryRun:true`；无 grant rc=4；`--no-restore-clip` → `clipRestored:false`。
+- 状态：✅ 通过（2026-10-25）
+
+### C18 · 路径与正文（v1.3）
+
+- **判据**：`wshot --out /tmp/x.png` → rc=0、文件存在、sha256 与 JSON 一致、`path` 为 Windows 落点、`wsl_path` 为入参路径；`ops/read-text --hwnd H` → `source:"uia"` 且 `chars>50`（网页），`--force-clip` 走剪贴板通道并还原剪贴板；`wwin focus --yes` → rc=0 且 `ignoredFlags:["--yes"]`（其余子命令仍 rc=2）；新旗标都出现在各自 `--help`。
+- 实测：m20 11/0 —— `wshot --out /tmp/...` mapped:true、sha256 与 `sha256sum` 一致；`/mnt/c` 目标不中转；uiawnd `--read-text` `mode:"readtext"` chars=10；`ops/read-text` `source:"uia"`；`--no-fallback` 空文本 → rc=3 `ENV_NO_TEXT`；`--force-clip` → `source:"clip"`、文本逐字符一致、`clipRestored:true`、剪贴板回到哨兵值；`wwin focus --yes` 接受、`wwin info --yes` rc=2；无 grant 时 force-clip rc=4 而 UIA 读 rc=0；live Edge `--read-text` chars=173067。
+- 状态：✅ 通过（2026-10-25）
+
+### C19 · 真实站点冒烟（v1.3）
+
+- **判据**：对已打开的真实浏览器（不重启、不切标签、不注入）只读冒烟：`--find-text` 有足够几何行、`--find-type Edit` 有结果、页面文本行中心 `--point` 命中（rect 含点）、暖树 `--find-name` ≤ 5 s；无浏览器时整份 SKIP、不判失败。
+- 实测：m21 4/0（1 SKIP）—— 用户 Edge `0x90cdc`：`--find-text '.' --limit 120` total=174、几何行 120、`depth>=8` 行 88、2743 ms；`--find-type Edit` total=4；`--point 391,195` → `TabItem "对话"`、`via:"rect-hit"`、rect 含点；暖树 2162 ms；B 站断言因活动标签不是 B 站而 SKIP（不切标签）。
+- 状态：✅ 通过（2026-10-25）
 ### S10 · 默认行为不变
 
 - **判据**：不传新开关时，`winput` 的匹配/校验行为、`wshot --rect` 语义、`ops/*` 输出（除新增字段）与 v1.1.0 一致。
@@ -302,6 +336,7 @@
 
 | **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0（skip=15：C3 最小化窗口 + 14 条非本里程碑占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
 | **M10 v1.2** | E13–E15 + C14–C16 + S10–S11 + E1–E12 回归 | ✅ 2026-10-24 冻结 v1.2.0（m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、release pass=yes；报告 `tests/reports/2026-10-24-m9.md`） |
+| **M11 v1.3** | E16–E18 + C17–C19 + E1–E15 回归 | ✅ 2026-10-25 冻结 v1.3.0（新判据 m16 10/0（1 SKIP）、m17 10/0（1 SKIP）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（1 SKIP）；全表回归 m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、release pass=yes，共 **242 条断言通过 / 0 失败 / 18 SKIP**；报告 `tests/reports/2026-10-25-v1.3.md`） |
 | **M9 网页语义** | 覆盖率报告（UIA 文本 / CDP innerText / 剪贴板基线） | 只出结论，不改主链路 |
 
 ## 验收记录规范

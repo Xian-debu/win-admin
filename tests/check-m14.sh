@@ -54,9 +54,10 @@ else
   bad 'N3 verify contains' "$(printf %s "$CJ" | jq -c '.verify' 2>/dev/null)"
 fi
 
-# N4: verify against a focus that cannot receive text (a button)
+# N4: verify against a focus that cannot receive text (a button). v1.3's focus gate (C17) fires
+# first, so --force is the documented way to reach the verify readback on a non-editable focus.
 ops/click-element --hwnd "$W" --name '^BTN-COUNT$' --strategy click --yes >/dev/null 2>&1
-MJ="$(bin/winput type --text 'm14-not-landed' --verify exact --yes 2>&1)"; MRC=$?
+MJ="$(bin/winput type --text 'm14-not-landed' --verify exact --force --yes 2>&1)"; MRC=$?
 if [ "$MRC" -eq 3 ] && [ "$(printf %s "$MJ" | jq -r .code)" = ENV_TEXT_NOT_ENTERED ] && [ "$(printf %s "$MJ" | jq -r '.verify.available')" = true ]; then
   ok 'N4 verify mismatch is rc=3 ENV_TEXT_NOT_ENTERED with a readback attached'
 else
@@ -95,6 +96,9 @@ else
   bad 'N9 native path' "got=$NT"
 fi
 printf '%s' 'm14 windows path' > "$TMP/m14-win.txt"
+# v1.3 focus gate (C17): N4 left the button focused, so put the caret back into the editable field.
+bash bin/wwin focus --hwnd "$W" >/dev/null 2>&1
+bash bin/wuia --hwnd "$W" --find-aid wa-edit --focus >/dev/null 2>&1
 WJ="$(bin/winput type --text-file "$WTMP/m14-win.txt" --yes 2>&1)"
 if [ "$(printf %s "$WJ" | jq -r .ok)" = true ]; then
   ok 'N10 a Windows-style --text-file path still works'

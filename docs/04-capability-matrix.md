@@ -167,3 +167,26 @@ v1.0 的四条绕路（窗口最大化写 PowerShell、悬停菜单靠坐标猜�
 - **数元素用 `--find-type .`**（K49）：`--find-name .` 会漏掉无名控件（Edit/ComboBox），拿它做覆盖率会少算。
 - **DIP ≠ 物理像素**（K53）：150% 缩放下差 1.5 倍；坐标一律取 UIA `rect` 或 `wwin state`，不要用界面代码里的 DIP。
 - **`ops/map` 的编号只在同一次调用内稳定**：界面变化后要重新 `map`，不要跨截图复用 idx。
+
+## 10 · v1.3 命中与正文（T20–T25）
+
+| 能力 | 可用 | 判据（实测） | 验收 |
+|---|---|---|---|
+| 冷暖树自适配 `wuia` 默认深度 | ✅ | 冷进程首查 **542 节点 / depth 20 / 1545 ms**（v1.2 只有 chrome 约 279）；落空自动加深到 28 并重试；输出 `passes/warmMs/warmRetries/depthUsed/deepened` | m16 N1–N11 |
+| 文本行索引 `--find-text RE` | ✅ | 行含 `text/rect/depth/actionable/clickable`，按 y 升序；无匹配 `total:0` 且 ok:true；真实页面 `--limit 120` 得 174 total / 120 几何行 / 2743 ms | m17 N1–N3、m21 N1 |
+| 几何命中 `--point` | ✅ | FromPoint 直命 `via:"uia-point"`；命中容器/空时暖树 rect-hit 回退 `via:"rect-hit"`；空白点 `ENV_NO_HIT` rc=3 | m17 N4–N6、m21 N3 |
+| 点击回报 `hit` | ✅ | 注入**之前**取 `hit{name,type,aid,rect,depth,actionable,clickable,raw}`；未命中 `hit:null`+`hitReason`；叶节点不可点时换成可点祖先并把原件放 `hit.raw` | m18 N1/N3/N4 |
+| 点击效果断言 `--expect-change` | ✅ | `title` 实测 50–64 ms 命中；空白点 1000 ms 超时 `ENV_NO_EFFECT` rc=3 并附 `before/after/observed/elapsedMs`；只认 `title`/`rect` | m18 N1/N2/N8/N10 |
+| 坐标 hit-test `ops/click-element` | ✅ | 落点属于别的窗口 → `ENV_HIT_MISMATCH` rc=3 且不注入；`--strategy click` 归一 `coords`；判断不了（容器节点）时放行 | m18 N5–N7 |
+| 按文本点 `winput click --click-text` | ✅ | 取第 N 行中心注入，JSON 带 `hit`；夹具窗口标题由 `wa-deep` 变 `clicked:deep-btn` | m17 N7、m18 N1 |
+| 输入落点契约 `type` | ✅ | 焦点不可编辑 → `ENV_NO_FOCUS`（`injected:false`）；粘贴未落地 → `ENV_NO_EFFECT`（`pasteSettled:false`、`before==after`）；`--force` 越过并回显 `forced:true` | m19 N1–N8 |
+| 正文一条命令 `ops/read-text` | ✅ | UIA 取回 **173067 字符**（真实 Edge）；`source:"uia"`；`--force-clip` 走剪贴板并还原（`clipRestored:true`）；`--no-fallback` 空文本 `ENV_NO_TEXT` | m20 N3–N6、m21 |
+| 输出路径 `wshot --out` | ✅ | `/tmp/x.png` → `mapped:true`、`path` 为 Windows 落点、`wsl_path` 原样、sha256 与文件一致；`/mnt/c` 目标不中转 | m20 N1/N2 |
+
+新增硬限制：
+
+- **先定窗再取样带**（K70）：Chromium 树里滚出视口的内容 `rect.y` 是 `-48412` 级负数，工具栏行 depth 7–8。按「`y>0` 且 `depth>=8`」取首行在真实页面会全军覆没，要按窗口 rect 取 `y ∈ [top+30, bottom-30]` 的带。
+- **`hit` 是 a11y 语义不是像素**：FromPoint 常落在按钮内部的 `TextBlock`（`actionable:false`），所以 `hit.name` 可能为空、`hit.actionable` 需要看 `clickable` 或祖先；它不是「像素上颜色变了」的证据，像素证据请配合 `--expect-change rect` 或 `wshot` 前后对比。
+- **`--expect-change` 只认 `title`/`rect`**：不认文本、不认颜色、不认 DOM；要断言「出现/消失」用 `ops/click-element --expect-gone/--expect-alive`，要断言文本落地用 `type --verify`。
+- **冷进程首查 2–3 s 是正常的**：a11y 树异步生长，默认会预热+重试；批量读网页请在**一次调用**里多取，而不是每步起一个新进程（每次冷启动都要付费）。
+- **`--find-text` 的行是 a11y 树视图内的行**：视口外的行 rect 为负，click-by-text 会拒绝（`ENV_HIT_MISMATCH`/`ENV_NO_HIT`）而不是盲点；要滚到位再点。
