@@ -5,7 +5,7 @@ set -uo pipefail
 . "$(dirname "$0")/../lib/audit.sh"
 wa_audit_init wuia "$@"
 
-LIST=0; HWND=""; TITLE=""; DEPTH=""; MAX=""; FILTER=""; VALUE=0; NOWARM=0; NODEEP=0; WMS=""; WPS=""; FTEXT=""; PMODE="auto"
+LIST=0; HWND=""; TITLE=""; DEPTH=""; MAX=""; FILTER=""; VALUE=0; NOWARM=0; NODEEP=0; WMS=""; WPS=""; FTEXT=""; PMODE="auto"; READTEXT=0
 FNAME=""; FTYPE=""; FAID=""; FCLASS=""; FENABLED=0; FONSCREEN=0; INDEX=0; LIMIT=20
 PX=""; PY=""; ACT=""; SETV=""; SETV_GIVEN=0
 while [ $# -gt 0 ]; do
@@ -16,6 +16,9 @@ usage:
   wuia --list
   wuia (--hwnd 0x1234 | --title REGEX) [--depth N] [--max N] [--filter REGEX]
   wuia (--hwnd H | --title RE) --value        read the first ValuePattern value under the window
+  wuia (--hwnd H | --title RE) --read-text    read the richest TextPattern text (T24: the page body);
+       ENV_NO_TEXT exit 3 when the window has no TextPattern (ops/read-text adds a
+       clipboard fallback, which needs an input grant)
   wuia --point X,Y                            what element is under a screen point (+ ancestors)
 
   text lines + geometric hit-test (T21):
@@ -71,6 +74,7 @@ EOF
       shift 2 ;;
     --find-text) FTEXT="$2"; shift 2 ;;
     --point-mode) PMODE="$2"; shift 2 ;;
+    --read-text) READTEXT=1; shift ;;
     --invoke|--select|--toggle|--expand|--collapse|--focus|--get-value|--get-text)
       ACT="${1#--}"; shift ;;
     --set-value) ACT="set-value"; SETV="$2"; SETV_GIVEN=1; shift 2 ;;
@@ -115,6 +119,7 @@ args=(wuia -Version "$VERSION" -Limit "$LIMIT" -Index "$INDEX")
 [ -n "$TITLE" ] && args+=(-Title "$TITLE")
 [ -n "$FILTER" ] && args+=(-Filter "$FILTER")
 [ "$VALUE" = 1 ] && args+=(-Value)
+[ "$READTEXT" = 1 ] && args+=(-ReadText)
 [ -n "$FTEXT" ] && args+=(-FindText "$FTEXT")
 [ -n "$FNAME" ] && args+=(-FindName "$FNAME")
 [ -n "$FTYPE" ] && args+=(-FindType "$FTYPE")

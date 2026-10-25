@@ -12,7 +12,7 @@ usage() {
 usage:
   wwin list
   wwin info  --hwnd 0x1234
-  wwin focus --hwnd 0x1234
+  wwin focus --hwnd 0x1234 [--yes]   (--yes is accepted and ignored: focus never injects)
   wwin close --hwnd 0x1234
   wwin state --hwnd 0x1234
   wwin set   --hwnd 0x1234 [--state max|min|restore|normal]
@@ -44,15 +44,23 @@ case "$sub" in
     wa_finish "$raw" ;;
   info|focus|close|state)
     shift || true
-    H=""
+    H=""; IGN=0
     while [ $# -gt 0 ]; do
       case "$1" in
         --hwnd) H="$2"; shift 2 ;;
+        # T24: focus is a read/gentle op that never injected anything, so the "use --yes" habit from
+        # the docs used to fail here. Accept it, ignore it, and say so in the JSON (C18-3).
+        --yes) if [ "$sub" = focus ]; then IGN=1; shift; else echo "unknown arg: $1" >&2; exit 2; fi ;;
         *) echo "unknown arg: $1" >&2; exit 2 ;;
       esac
     done
     [ -n "$H" ] || { echo "$sub needs --hwnd" >&2; exit 2; }
     raw="$(wa_run wwin -Action "$sub" -Hwnd "$((H))")"
+    if [ "$IGN" -eq 1 ]; then
+      j="$(wa_finish "$raw")" || exit $?
+      printf '%s\n' "$j" | jq -c '. + {ignoredFlags: ["--yes"]}'
+      exit 0
+    fi
     wa_finish "$raw" ;;
   set)
     shift || true

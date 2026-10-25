@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# ops/read-text - read the text of a window. Read-only: UIA TextPattern first; the clipboard
+# fallback is only for windows without TextPattern and needs an input grant (T24, C18-2).
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-read-text "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/read-text (--hwnd H | --title REGEX) [--no-fallback] [--force-clip]
+  Reads the visible text of a window and prints {ok,tool,hwnd,text,chars,source,ms}.
+  source:"uia"  = UIA TextPattern (whole document body; no grant needed)
+  source:"clip" = ctrl+a / ctrl+c fallback for windows without TextPattern (needs the input
+                  grant); the previous clipboard is restored and that is reported as clipRestored.
+  --no-fallback  never inject: report ENV_NO_TEXT (exit 3) instead of touching the clipboard
+  --force-clip   skip UIA and go straight to the clipboard fallback (for windows whose
+                 TextPattern is empty or stale even though the text is copyable)
+  exit 0 ok | 2 arg | 3 env (no window / no text) | 4 guard (fallback needs input) | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; NOFALL=0; FORCECLIP=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --no-fallback) NOFALL=1; shift ;;
+    --force-clip) FORCECLIP=1; shift ;;
+    --yes) shift ;;   # read-only op: accepted for symmetry, nothing to confirm
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[ "$HWND" != "0" ] || [ -n "$TITLE" ] || { usage >&2; exit 2; }
+
+op_pause_gate read
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"
+
+T0="$(date +%s%3N)"
+J=""; TXT=""
+if [ "$FORCECLIP" -eq 0 ]; then
+  J="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --read-text 2>/dev/null)" || true
+  TXT="$(printf '%s' "$J" | jq -r '.text // empty' 2>/dev/null)"
+fi
+if [ -n "$TXT" ]; then
+  MS=$(( $(date +%s%3N) - T0 ))
+  WA_AUDIT_RESULT=ok
+  # A web page body can be hundreds of KB; --arg would blow past ARG_MAX, so hand jq a file.
+  TF="$(mktemp)"
+  printf '%s' "$TXT" > "$TF"
+  JF="$(mktemp)"
+  printf '%s' "$J" > "$JF"
+  # hwnd is reported as the caller-specified handle string ("0x90cdc"); numbers are not JSON for --argjson.
+  jq -nc --arg h "$H" --rawfile t "$TF" --slurpfile w "$JF" --argjson ms "$MS" \
+    '{ok:true,tool:"ops/read-text",hwnd:$h,text:$t,chars:($t|length),source:"uia",ms:$ms,candidates:($w[0].candidates // 0),element:($w[0].element // null)}'
+  rm -f "$JF"
+  rm -f "$TF"
+  exit 0
+fi
+
+if [ "$NOFALL" -eq 1 ]; then
+  WA_AUDIT_RESULT=ENV_NO_TEXT
+  jq -nc --arg h "$H" '{ok:false,code:"ENV_NO_TEXT",msg:"window has no TextPattern text and --no-fallback was given",tool:"ops/read-text",hwnd:$h}'
+  exit 3
+fi
+
+# Clipboard fallback: this is injection, so it needs the input grant and must say so.
+G="$(bash "$REPO_DIR/guard/check.sh" input)"; GRC=$?
+if [ "$GRC" -ne 0 ]; then
+  WA_AUDIT_RESULT=GUARD_NO_GRANT
+  printf '%s\n' "$G"
+  exit "$GRC"
+fi
+
+if ! bash "$REPO_DIR/bin/wwin" focus --hwnd "$H" >/dev/null 2>&1; then
+  WA_AUDIT_RESULT=ENV_NOT_FOREGROUND
+  op_die ENV_NOT_FOREGROUND "could not bring hwnd $H to the foreground for the clipboard fallback"
+fi
+
+SAVED="$(bash "$REPO_DIR/bin/wclip" get 2>/dev/null | jq -r '.text // empty')"
+RESTORED=false
+restore_clip() {
+  if [ -n "$SAVED" ]; then
+    local f="$APP_ROOT/tmp/readtext-restore-$$.txt"
+    printf '%s' "$SAVED" > "$f"
+    bash "$REPO_DIR/bin/wclip" set --text-file "$f" >/dev/null 2>&1 && RESTORED=true
+    rm -f "$f"
+  else
+    bash "$REPO_DIR/bin/wclip" clear >/dev/null 2>&1 && RESTORED=true
+  fi
+}
+
+bash "$REPO_DIR/bin/winput" key ctrl+a --expect-hwnd "$H" --focus --yes >/dev/null 2>&1 || true
+bash "$REPO_DIR/bin/winput" key ctrl+c --expect-hwnd "$H" --yes >/dev/null 2>&1 || true
+sleep 0.15
+TXT="$(bash "$REPO_DIR/bin/wclip" get 2>/dev/null | jq -r '.text // empty')"
+restore_clip
+MS=$(( $(date +%s%3N) - T0 ))
+
+if [ -z "$TXT" ]; then
+  WA_AUDIT_RESULT=ENV_NO_TEXT
+  jq -nc --arg h "$H" --argjson ms "$MS" --argjson r "$RESTORED" \
+    '{ok:false,code:"ENV_NO_TEXT",msg:"no TextPattern and the clipboard fallback produced nothing",tool:"ops/read-text",hwnd:$h,source:"clip",ms:$ms,clipRestored:$r}'
+  exit 3
+fi
+
+WA_AUDIT_RESULT=ok
+TF="$(mktemp)"
+printf '%s' "$TXT" > "$TF"
+jq -nc --arg h "$H" --rawfile t "$TF" --argjson ms "$MS" --argjson r "$RESTORED" \
+  '{ok:true,tool:"ops/read-text",hwnd:$h,text:$t,chars:($t|length),source:"clip",ms:$ms,clipRestored:$r}'
+rm -f "$TF"
+exit 0

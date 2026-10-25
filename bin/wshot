@@ -16,6 +16,9 @@ usage: wshot [--out PATH.png] [--rect X,Y,W,H | --box X1,Y1,X2,Y2 | --hwnd H] [-
   --box X1,Y1,X2,Y2  same, as a left-top/right-bottom pair (converted to X,Y,W,H here)
   --hwnd H           shoot exactly that window's rect (mutually exclusive with --rect/--box)
   --clip             trim a rect that runs off the screen instead of failing (JSON clipped:true)
+  --out PATH.png     /mnt/... is written directly; any other path (e.g. /tmp/x.png) is written in
+                     the shared tmp dir and copied back (JSON mapped:true, windows_tmp, path =
+                     Windows landing site, wsl_path = the path you asked for)
   --grid N           overlay a ruler every N px, labelled with absolute screen coordinates.
                      The PNG is physical pixels: when reading coordinates off the image either
                      use --grid or divide by scale (= dpi/96, reported in the JSON).
@@ -84,7 +87,23 @@ if [ -n "$BOX" ]; then
 fi
 
 args=(wshot -Version "$VERSION")
-if [ -n "$OUT" ]; then args+=(-Out "$(wa_winpath "$OUT")"); fi
+OUT_ABS=""; OUT_MAPPED=0
+if [ -n "$OUT" ]; then
+  # T24: the Windows payload cannot write a bare WSL path (/tmp/x.png). Only /mnt/* has a Windows
+  # home; everything else is written into the shared tmp dir and copied back here.
+  case "$OUT" in
+    /*) OUT_ABS="$OUT" ;;
+    *) OUT_ABS="$(pwd)/$OUT" ;;
+  esac
+  case "$OUT_ABS" in
+    /mnt/*) args+=(-Out "$(wa_winpath "$OUT_ABS")") ;;
+    *)
+      OUT_MAPPED=1
+      OUT_TMP="$APP_ROOT/tmp/shot-$(printf '%s' "$OUT_ABS" | sha1sum | awk '{print $1}' | cut -c1-8).png"
+      args+=(-Out "$(wa_winpath "$OUT_TMP")")
+      ;;
+  esac
+fi
 if [ -n "$HWND" ]; then args+=(-Hwnd "$((HWND))"); fi
 if [ "$GRID" -gt 0 ]; then args+=(-Grid "$GRID"); fi
 if [ "$CLIP" -eq 1 ]; then args+=(-Clip); fi
@@ -101,6 +120,13 @@ if [ -z "$j" ]; then
   exit 5
 fi
 if printf '%s' "$j" | jq -e '.ok == true' >/dev/null 2>&1; then
+  if [ "$OUT_MAPPED" -eq 1 ]; then
+    landed="$(printf %s "$j" | jq -r .path)"
+    mkdir -p "$(dirname "$OUT_ABS")" || { wa_err_json EXEC_OUT_DIR "cannot create $(dirname "$OUT_ABS")"; exit 5; }
+    cp -f "$(wa_wslpath "$landed")" "$OUT_ABS" || { wa_err_json EXEC_COPY_FAIL "cannot copy $landed -> $OUT_ABS"; exit 5; }
+    printf '%s\n' "$j" | jq -c --arg w "$OUT_ABS" --arg l "$landed" '. + {wsl_path: $w, mapped: true, windows_tmp: $l}'
+    exit 0
+  fi
   printf '%s\n' "$j" | jq -c --arg w "$(wa_wslpath "$(printf '%s' "$j" | jq -r .path)")" '. + {wsl_path: $w}'
   exit 0
 fi

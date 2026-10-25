@@ -29,6 +29,7 @@ param(
     # ---- T21: text lines + geometric hit-test (v1.3) ----
     [string]$FindText = '',
     [string]$PointMode = 'auto',
+    [switch]$ReadText,
     # ---- T6: acting ----
     [string]$Action = '',
     [string]$SetValue = '',
@@ -311,6 +312,55 @@ try {
     }
     $rootEl = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Hwnd)
     if (-not $rootEl) { Write-Fail2 'ENV_NO_WINDOW' "no UIA element for hwnd $Hwnd" $null 3 }
+
+    # ---- T24: read the richest TextPattern text under the window (read-only; no injection) ----
+    #
+    # Chromium exposes the page body as a Document with TextPattern (the whole rendered text), while
+    # many Win32/WPF editors only have ValuePattern - those fall back to the clipboard path in
+    # ops/read-text. Longest candidate wins so a wrapper Document does not win over the real body.
+    if ($ReadText) {
+        $script:rtNodes = 0
+        $script:rtCands = 0
+        $script:rtBest = $null
+        $script:rtBestText = ''
+        function Read-WaText($e, $d) {
+            if ($script:rtNodes -ge 6000 -or $d -gt 30) { return }
+            $script:rtNodes = $script:rtNodes + 1
+            $tp = Get-WaPattern $e 'Text'
+            if ($tp) {
+                $t = $null
+                try { $t = $tp.DocumentRange.GetText(-1) } catch { $t = $null }
+                if ($null -ne $t) {
+                    $script:rtCands = $script:rtCands + 1
+                    if ($t.Length -gt $script:rtBestText.Length) {
+                        $script:rtBestText = $t
+                        $script:rtBest = Get-NodeView $e $d
+                    }
+                }
+            }
+            $c = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetFirstChild($e)
+            while ($c) {
+                Read-WaText $c ($d + 1)
+                $c = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetNextSibling($c)
+            }
+        }
+        Read-WaText $rootEl 0
+        if (-not $script:rtBest -or $script:rtBestText.Length -eq 0) {
+            Write-Fail2 'ENV_NO_TEXT' 'no TextPattern text under this window; the clipboard fallback lives in ops/read-text (it needs an input grant)' @{ hwnd = ('0x{0:x}' -f $Hwnd); candidates = $script:rtCands; nodes = $script:rtNodes } 3
+        }
+        Out-WaJson ([ordered]@{
+            ok         = $true
+            mode       = 'readtext'
+            hwnd       = ('0x{0:x}' -f $Hwnd)
+            text       = $script:rtBestText
+            chars      = $script:rtBestText.Length
+            element    = $script:rtBest
+            candidates = $script:rtCands
+            nodes      = $script:rtNodes
+            version    = $Version
+        })
+        exit 0
+    }
 
     if ($Value) {
         $script:found = $null
