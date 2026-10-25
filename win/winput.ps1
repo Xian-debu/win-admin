@@ -23,7 +23,8 @@ param(
     [string]$VerifyMode = '',
     [switch]$NoRestoreClip,
     [string]$ExpectChange = '',
-    [int]$TimeoutMs = 2000
+    [int]$TimeoutMs = 2000,
+    [switch]$Force
 )
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 $env:WA_VERSION = $Version
@@ -288,6 +289,32 @@ function Get-FocusedReadback {
     return $r
 }
 
+# T23 (C17): "is the focused element editable at all" - separate from "can we read its value".
+# Value/Text patterns mean a paste can land there; ControlType.Edit/Document covers plain editors.
+function Get-FocusInfo {
+    $r = @{ available = $false; editable = $false; reason = 'no focused element'; focused = $null; via = '' }
+    try {
+        $fe = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($null -eq $fe) { return $r }
+        $r.available = $true
+        $r.focused = @{ name = $fe.Current.Name; type = $fe.Current.ControlType.ProgrammaticName; aid = $fe.Current.AutomationId; class = $fe.Current.ClassName }
+        $vp = $null
+        if ($fe.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$vp)) {
+            $r.editable = $true; $r.via = 'value'; $r.reason = 'Value pattern'; return $r
+        }
+        $tp = $null
+        if ($fe.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern, [ref]$tp)) {
+            $r.editable = $true; $r.via = 'text'; $r.reason = 'Text pattern'; return $r
+        }
+        $t = $fe.Current.ControlType.ProgrammaticName
+        if ($t -eq 'ControlType.Edit' -or $t -eq 'ControlType.Document') {
+            $r.editable = $true; $r.via = 'type'; $r.reason = "control type $t"; return $r
+        }
+        $r.reason = "focused $t has no Value/Text pattern"
+    } catch { $r.reason = 'focus probe failed: ' + $_.Exception.Message }
+    return $r
+}
+
 function Normalize-Text([string]$t) {
     if ($null -eq $t) { return '' }
     return ($t -replace "`r`n", "`n").TrimEnd()
@@ -526,6 +553,17 @@ switch ($Action) {
         if (-not $chk.ok) { Fail $chk.code $chk.msg 3 }
         $text = [IO.File]::ReadAllText($TextFile, [Text.Encoding]::UTF8)
         if ($DryRun) { Out-Plan 'type' @{ chars = $text.Length; preview = ($text.Substring(0, [Math]::Min(60, $text.Length))); target = (Get-TargetInfo $target) }; exit 0 }
+        # C17-1 (T23): typing is blind injection - refuse when the focused control cannot accept text.
+        $fi = Get-FocusInfo
+        if (-not $Force -and -not $fi.editable) {
+            Out-WaJson ([ordered]@{
+                ok = $false; code = 'ENV_NO_FOCUS'
+                msg = "focused element cannot receive text ($($fi.reason)); focus the target field first, or pass --force to type anyway"
+                action = 'type'; injected = $false; focused = $fi.focused; reason = $fi.reason
+                target = (Get-TargetInfo $target); version = $Version
+            })
+            exit 3
+        }
         # Snapshot the focused value first, so 'did the paste land' can be judged by a real change
         # (a longer pre-existing value must not count as landed).
         $preVal = $null
@@ -550,9 +588,11 @@ switch ($Action) {
             Start-Sleep -Milliseconds 120
         } else {
             $landed = $false
+            $sawReadable = [bool]$fbPre.available
             while ($settleMs -lt 900) {
                 $fb0 = Get-FocusedReadback
                 if (-not $fb0.available) { break }
+                $sawReadable = $true
                 $got0 = Normalize-Text $fb0.value
                 if (($wantNorm.Length -gt 0 -and $got0.Contains($wantNorm)) -or ($null -ne $preVal -and $got0 -cne $preVal)) { $landed = $true; break }
                 Start-Sleep -Milliseconds 60
@@ -561,7 +601,22 @@ switch ($Action) {
             if (-not $landed) { Start-Sleep -Milliseconds 250 }
             if ($had) { [Windows.Forms.Clipboard]::SetText($old) } else { [Windows.Forms.Clipboard]::Clear() }
         }
-        $res = @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); pasteSettled = $landed; settleMs = $settleMs; target = (Get-TargetInfo $target); version = $Version }
+        # C17-2 (T23): we could read the focused value, and it did not change - the paste did not
+        # land. That used to be reported as ok:true (the F4 incident). --force keeps the v1.2 answer.
+        if (-not $Force -and -not $NoRestoreClip -and -not $landed -and $sawReadable) {
+            $afterVal = $null
+            try { $afb = Get-FocusedReadback; if ($afb.available) { $afterVal = (Normalize-Text $afb.value) } } catch { $afterVal = $null }
+            Out-WaJson ([ordered]@{
+                ok = $false; code = 'ENV_NO_EFFECT'
+                msg = 'typed text never appeared in the focused element within the settle window'
+                action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'
+                clipRestored = $true; pasteSettled = $false; settleMs = $settleMs
+                before = $preVal; after = $afterVal
+                focused = $fi.focused; target = (Get-TargetInfo $target); version = $Version
+            })
+            exit 3
+        }
+        $res = @{ ok = $true; action = 'type'; injected = $true; chars = $text.Length; method = 'clipboard+ctrl+v'; clipRestored = (-not $NoRestoreClip); pasteSettled = $landed; settleMs = $settleMs; forced = [bool]$Force; focused = $fi.focused; target = (Get-TargetInfo $target); version = $Version }
         if ($VerifyMode) {
             $fb = Get-FocusedReadback
             $want = Normalize-Text $text

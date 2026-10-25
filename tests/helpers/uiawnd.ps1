@@ -77,6 +77,17 @@ $edit.FontSize = 14
 $edit.Add_TextChanged({ Log ("value " + $edit.Text) })
 $root.Children.Add($edit) | Out-Null
 
+# T23: read-only editor. It is UIA-readable (Text pattern) but silently ignores a paste, which is
+# exactly the "reported success, nothing landed" shape C17-2 must catch.
+$ro = New-Object System.Windows.Controls.RichTextBox
+$ro.Height = 44
+$ro.IsReadOnly = $true
+[System.Windows.Automation.AutomationProperties]::SetAutomationId($ro, 'wa-ro')
+$roPara = New-Object System.Windows.Documents.Paragraph
+$roPara.Inlines.Add((New-Object System.Windows.Documents.Run('readonly')))
+$ro.Document.Blocks.Add($roPara)
+$root.Children.Add($ro) | Out-Null
+
 $chk = New-Object System.Windows.Controls.CheckBox
 $chk.Content = 'CHK-A'
 $chk.Height = 28
