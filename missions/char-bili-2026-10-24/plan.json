@@ -1,0 +1,55 @@
+{
+  "id": "char-bili-2026-10-24",
+  "title": "B站投稿：角色建模教学片",
+  "created": "2026-10-24T21:54:37+0800",
+  "steps": [
+    {
+      "n": 1,
+      "title": "上传视频文件",
+      "status": "done",
+      "verify": "上传进度出现且文件名 Char.mp4",
+      "attempts": 0,
+      "evidence": [],
+      "notes": [],
+      "created": "2026-10-24T21:54:37+0800",
+      "finished": "2026-10-24T21:55:58+0800",
+      "outcome": "上传完成：页面显示 Char 上传完成绿条，文件 E:/aigen_out/char_delivery/Char.mp4 (24518124 B)"
+    },
+    {
+      "n": 2,
+      "title": "填标题简介标签分区",
+      "status": "done",
+      "verify": "各字段回读等于期望",
+      "attempts": 0,
+      "evidence": [],
+      "notes": [],
+      "created": "2026-10-24T21:54:37+0800",
+      "finished": "2026-10-24T22:01:19+0800",
+      "outcome": "标题/创作声明含AI生成内容/分区科技数码/8 个标签/简介 544 字（回读 RootWebArea 文本与截图确认）"
+    },
+    {
+      "n": 3,
+      "title": "上传封面",
+      "status": "done",
+      "verify": "封面区域显示自定义封面",
+      "attempts": 0,
+      "evidence": [],
+      "notes": [],
+      "created": "2026-10-24T21:54:37+0800",
+      "finished": "2026-10-24T22:01:19+0800",
+      "outcome": "自定义封面 cover.png（1920x1080）已上传并在 4:3 与 16:9 预览中显示"
+    },
+    {
+      "n": 4,
+      "title": "声明与提交",
+      "status": "done",
+      "verify": "跳转到投稿成功页并取到 BV 号",
+      "attempts": 0,
+      "evidence": [],
+      "notes": [],
+      "created": "2026-10-24T21:54:37+0800",
+      "finished": "2026-10-24T22:07:28+0800",
+      "outcome": "点击立即投稿 → 稿件投递成功页；稿件管理列表显示 2026-10-24 22:06:34 已提交，转码中/审核中"
+    }
+  ]
+}
