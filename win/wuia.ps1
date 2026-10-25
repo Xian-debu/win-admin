@@ -26,6 +26,9 @@ param(
     [int]$Limit = 20,
     [int]$PointX = -1,
     [int]$PointY = -1,
+    # ---- T21: text lines + geometric hit-test (v1.3) ----
+    [string]$FindText = '',
+    [string]$PointMode = 'auto',
     # ---- T6: acting ----
     [string]$Action = '',
     [string]$SetValue = '',
@@ -114,6 +117,97 @@ function Merge-Ctx($o, $ctx) {
     return $o
 }
 
+function Get-WaAncestors($el, [int]$maxDepth) {
+    $chain = New-Object System.Collections.ArrayList
+    $p = $null
+    try { $p = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($el) } catch { $p = $null }
+    if (-not $p) {
+        try { $p = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($el) } catch { $p = $null }
+    }
+    $d = 1
+    while ($p -and $d -le $maxDepth) {
+        $v = Get-NodeView $p $d
+        if ($v) { [void]$chain.Add($v) }
+        $next = $null
+        try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
+        if (-not $next) {
+            try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
+        }
+        if (-not $next -or $next -eq $p) { break }
+        $p = $next
+        $d = $d + 1
+    }
+    return @($chain)
+}
+
+# T21: "can something be clicked here?" - a role list plus the patterns that act on an element.
+function Test-WaActionable($view) {
+    if (-not $view) { return $false }
+    if ($view.type -in @('ControlType.Button', 'ControlType.Hyperlink', 'ControlType.CheckBox', 'ControlType.RadioButton',
+                          'ControlType.ListItem', 'ControlType.ComboBox', 'ControlType.Edit', 'ControlType.TabItem',
+                          'ControlType.MenuItem', 'ControlType.TreeItem', 'ControlType.SplitButton')) { return $true }
+    foreach ($p in @($view.patterns)) {
+        if ($p -in @('Invoke', 'Toggle', 'SelectionItem', 'ExpandCollapse', 'Value')) { return $true }
+    }
+    return $false
+}
+
+function New-WaUnder($el, [string]$via) {
+    $v = Get-NodeView $el 0
+    if (-not $v) { return $null }
+    return [ordered]@{
+        name = $v.name; type = $v.type; aid = $v.aid; class = $v.class
+        rect = $v.rect; depth = $v.depth; via = $via
+        actionable = (Test-WaActionable $v)
+    }
+}
+
+# T21: the nearest ancestor (or self) that can be clicked - what "--find-text then click" should hit.
+function Get-WaClickableAncestor($el) {
+    $p = $el
+    $d = 0
+    while ($p -and $d -le 10) {
+        $v = Get-NodeView $p $d
+        if ($v -and (Test-WaActionable $v)) {
+            return [ordered]@{ name = $v.name; type = $v.type; aid = $v.aid; rect = $v.rect; depth = $v.depth }
+        }
+        $next = $null
+        try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
+        if (-not $next) {
+            try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
+        }
+        if (-not $next -or $next -eq $p) { break }
+        $p = $next
+        $d = $d + 1
+    }
+    return $null
+}
+
+# T21 geometric hit-test: the smallest named/actionable rect in the warm tree that contains the point.
+# Container roles are skipped so "blank page area" honestly reports nothing (docs/22 E17-4).
+function Get-WaRectHit([int]$x, [int]$y) {
+    $best = $null; $bestArea = 0; $bestDepth = -1
+    foreach ($c in $script:cols) {
+        $v = $c.view
+        if (-not $v) { continue }
+        if ($v.type -in @('ControlType.Window', 'ControlType.Document', 'ControlType.Pane', 'ControlType.Group')) { continue }
+        if (-not $v.name -and -not (Test-WaActionable $v)) { continue }
+        $r = $v.rect
+        if ($r.w -le 0 -or $r.h -le 0) { continue }
+        if ($x -lt $r.x -or $x -ge ($r.x + $r.w) -or $y -lt $r.y -or $y -ge ($r.y + $r.h)) { continue }
+        $area = $r.w * $r.h
+        if ($null -eq $best -or $area -lt $bestArea -or ($area -eq $bestArea -and $v.depth -gt $bestDepth)) {
+            $best = $v; $bestArea = $area; $bestDepth = $v.depth
+        }
+    }
+    if (-not $best) { return $null }
+    return [ordered]@{
+        name = $best.name; type = $best.type; aid = $best.aid; class = $best.class
+        rect = $best.rect; depth = $best.depth; via = 'rect-hit'
+        actionable = (Test-WaActionable $best)
+    }
+}
+
 function Write-Fail2([string]$code, [string]$msg, $extra, [int]$exitCode) {
     $o = [ordered]@{ ok = $false; code = $code; msg = $msg; version = $Version }
     if ($null -ne $extra) { foreach ($k in $extra.Keys) { $o[$k] = $extra[$k] } }
@@ -147,38 +241,22 @@ try {
         exit 0
     }
 
-    # ---- point probe (T5): what sits under this screen coordinate, and what contains it ----
-    if ($PointX -ge 0 -and $PointY -ge 0) {
+    # ---- point probe without a target window (T5 legacy path): FromPoint only ----
+    if (($PointX -ge 0 -and $PointY -ge 0) -and -not $Hwnd -and -not $Title) {
         $pt = New-Object System.Windows.Point($PointX, $PointY)
         $el = $null
         try { $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { $el = $null }
-        if (-not $el) { Write-Fail2 'ENV_NO_ELEMENT' "no element at $PointX,$PointY" $null 3 }
-        $self = Get-NodeView $el 0
-        $chain = New-Object System.Collections.ArrayList
-        $p = $null
-        try { $p = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($el) } catch { $p = $null }
-        if (-not $p) {
-            try { $p = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($el) } catch { $p = $null }
-        }
-        $d = 1
-        while ($p -and $d -le 6) {
-            $v = Get-NodeView $p $d
-            if ($v) { [void]$chain.Add($v) }
-            $next = $null
-            try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
-            if (-not $next) {
-                try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
-            }
-            if (-not $next -or $next -eq $p) { break }
-            $p = $next
-            $d = $d + 1
+        if (-not $el) {
+            Write-Fail2 'ENV_NO_HIT' "nothing under $PointX,$PointY (ENV_NO_HIT)" ([ordered]@{ point = [ordered]@{ x = $PointX; y = $PointY }; via = 'uia-point' }) 3
         }
         Out-WaJson ([ordered]@{
             ok        = $true
             mode      = 'point'
             point     = [ordered]@{ x = $PointX; y = $PointY }
-            element   = $self
-            ancestors = $chain
+            under     = (New-WaUnder $el 'uia-point')
+            via       = 'uia-point'
+            element   = (Get-NodeView $el 0)
+            ancestors = (Get-WaAncestors $el 6)
         })
         exit 0
     }
@@ -256,7 +334,10 @@ try {
     $script:cols = New-Object System.Collections.ArrayList
     $script:truncated = $false
     $re = if ($Filter) { [regex]$Filter } else { $null }
-    $findMode = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly -or $Action)
+    # T21: a point probe with a target window also uses the find-grade tree, because the rect-hit fallback
+    # needs names/rects deeper than the 3-level tree dump.
+    $pointModeWanted = ($PointX -ge 0 -and $PointY -ge 0) -and ($Hwnd -or $Title)
+    $findMode = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly -or $Action -or $FindText -or $pointModeWanted)
     if ($Depth -ge 0) { $depthGiven = $true; $baseDepth = $Depth } else { $depthGiven = $false; $baseDepth = if ($findMode) { 20 } else { 3 } }
     $script:nodeCap = if ($MaxNodes -ge 1) { $MaxNodes } elseif ($findMode) { 4000 } else { 400 }
 
@@ -296,8 +377,21 @@ try {
         Invoke-WaWalk $rootEl
         if ($findMode) {
             $hitCount = 0
-            foreach ($c in $script:cols) { if (Test-WaMatch $c.view) { $hitCount = $hitCount + 1 } }
-            $needMore = $hitCount -eq 0
+            if ($FindText) {
+                # T21: a text line is "a hit" only when it has a name and a real rect - the same rule the
+                # textlines output applies, so the warm loop and the answer cannot disagree.
+                foreach ($c in $script:cols) {
+                    $v = $c.view
+                    if ($v -and $v.name -and $v.rect.w -gt 0 -and $v.rect.h -gt 0 -and ($v.name -match $FindText)) { $hitCount = $hitCount + 1 }
+                }
+            } elseif ($pointModeWanted) {
+                # T21: for a point probe "a hit" means a candidate rect actually contains the point -
+                # otherwise a shallow tree of containers would look like success and never deepen.
+                $needMore = ($null -eq (Get-WaRectHit $PointX $PointY))
+            } else {
+                foreach ($c in $script:cols) { if (Test-WaMatch $c.view) { $hitCount = $hitCount + 1 } }
+            }
+            if (-not $pointModeWanted) { $needMore = $hitCount -eq 0 }
         } else {
             $needMore = $script:emptyDoc
         }
@@ -316,6 +410,112 @@ try {
         break
     }
     $warmMs = [int]((Get-Date) - $warmStart).TotalMilliseconds
+
+    # ---- T21: point with a target window - FromPoint first, warm-tree rect-hit as the honest answer ----
+    #
+    # Chromium returns Document/Pane for page points (docs/21 F1/F3), so "FromPoint said Document"
+    # must not be reported as "you hit the page": we fall back to the smallest named/actionable rect
+    # in the warm tree. --point-mode rect forces the fallback (diagnostics), --point-mode uia forces the
+    # old behaviour, auto is the default and only falls back for null/container results.
+    if ($PointX -ge 0 -and $PointY -ge 0) {
+        $pt = New-Object System.Windows.Point($PointX, $PointY)
+        $el = $null
+        try { $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { $el = $null }
+        $uiaUnder = $null
+        if ($el) { $uiaUnder = New-WaUnder $el 'uia-point' }
+        $uiaContainer = $false
+        if ($uiaUnder -and ($uiaUnder.type -in @('ControlType.Document', 'ControlType.Pane', 'ControlType.Window', 'ControlType.Group'))) { $uiaContainer = $true }
+        $under = $null
+        $via = ''
+        if ($PointMode -eq 'uia') {
+            $under = $uiaUnder
+            $via = 'uia-point'
+        } elseif ($PointMode -eq 'rect') {
+            # forced: report the warm-tree rect answer or nothing - no silent fallback to FromPoint
+            $under = Get-WaRectHit $PointX $PointY
+            if ($under) { $via = 'rect-hit' }
+        } else {
+            $useRect = ($null -eq $uiaUnder) -or $uiaContainer
+            if ($useRect) { $under = Get-WaRectHit $PointX $PointY; if ($under) { $via = 'rect-hit' } }
+            # a container (or nothing) from FromPoint is not an answer: only a real non-container hit may
+            # win the fallback, otherwise a blank page area would report "you clicked the Window" (E17-4).
+            if (-not $under -and $uiaUnder -and -not $uiaContainer) { $under = $uiaUnder; $via = 'uia-point' }
+        }
+        if (-not $under) {
+            Write-Fail2 'ENV_NO_HIT' "nothing under $PointX,$PointY (ENV_NO_HIT)" ([ordered]@{
+                point = [ordered]@{ x = $PointX; y = $PointY }
+                via = $(if ($PointMode -eq 'uia') { 'uia-point' } else { 'rect-hit' })
+                scanned = $script:cols.Count
+                depthUsed = $depthUsed
+            }) 3
+        }
+        $selfView = $null
+        if ($el) { $selfView = Get-NodeView $el 0 }
+        $chain = @()
+        if ($el) { $chain = @(Get-WaAncestors $el 6) }
+        Out-WaJson ([ordered]@{
+            ok        = $true
+            mode      = 'point'
+            hwnd      = ('0x{0:x}' -f $Hwnd)
+            point     = [ordered]@{ x = $PointX; y = $PointY }
+            under     = $under
+            via       = $via
+            element   = $selfView
+            ancestors = $chain
+            passes    = $passes
+            warmMs    = $warmMs
+            depthUsed = $depthUsed
+        })
+        exit 0
+    }
+
+    # ---- T21: text lines - name + geometry, sorted by (y, x), with the clickable node they belong to ----
+    if (-not $Action -and $FindText) {
+        $tre = [regex]$FindText
+        $lines = New-Object System.Collections.ArrayList
+        foreach ($c in $script:cols) {
+            $v = $c.view
+            if (-not $v -or -not $v.name) { continue }
+            if ($v.rect.w -le 0 -or $v.rect.h -le 0) { continue }
+            if (-not ($v.name -match $tre)) { continue }
+            [void]$lines.Add([ordered]@{
+                text      = $v.name
+                rect      = $v.rect
+                depth     = $v.depth
+                type      = $v.type
+                name      = $v.name
+                aid       = $v.aid
+                class     = $v.class
+                actionable = (Test-WaActionable $v)
+                clickable = (Get-WaClickableAncestor $c.el)
+            })
+        }
+        $sorted = @($lines | Sort-Object @{ Expression = { $_.rect.y } }, @{ Expression = { $_.rect.x } })
+        $outL = New-Object System.Collections.ArrayList
+        $ln = 0
+        foreach ($l in $sorted) {
+            if ($ln -ge $Limit) { break }
+            [void]$outL.Add($l)
+            $ln = $ln + 1
+        }
+        Out-WaJson ([ordered]@{
+            ok        = $true
+            mode      = 'textlines'
+            hwnd      = ('0x{0:x}' -f $Hwnd)
+            query     = [ordered]@{ text = $FindText }
+            scanned   = $script:cols.Count
+            truncated = $script:truncated
+            passes    = $passes
+            warmMs    = $warmMs
+            warmRetries = $warmRetries
+            depthUsed = $depthUsed
+            deepened  = $deepened
+            total     = $lines.Count
+            count     = $outL.Count
+            lines     = $outL
+        })
+        exit 0
+    }
 
     # ---- T5: find (only when no action was asked for; an action always wins) ----
     if (-not $Action -and ($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly)) {
