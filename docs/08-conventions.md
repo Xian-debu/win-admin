@@ -128,3 +128,52 @@ set -euo pipefail
 - [ ] 实测结果写进 `docs/07` 的实测列或 `tests/reports/`
 - [ ] 相关的 `docs/04` 状态已更新（🧪 → ✅）
 - [ ] 没有引入新的 `待验` 却不在文档里标注
+
+## 9. PowerShell 调用纪律（每次调用都适用）
+
+> 起因：v1.4 手工验证时，一个 `-WindowStyle Normal` 起的夹具控制台带着 `PointToScreen` 异常糊在测试窗口上，还抢走前台（K67 / K72）。这不是某个夹具的问题，是**启动契约**的问题。
+
+### 9.1 每一处 `Start-Process powershell.exe` 的固定形状
+
+```bash
+Start-Process powershell.exe -ArgumentList @(
+  '-NoLogo', '-NoProfile', '-STA', '-NonInteractive',
+  '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass',
+  '-File', $script,
+  '-RedirectStandardError', $err, '-RedirectStandardOutput', $out
+) -PassThru
+```
+
+- **必须**：`-NoLogo -NoProfile -NonInteractive -WindowStyle Hidden -ExecutionPolicy Bypass`，加 `-RedirectStandardError` / `-RedirectStandardOutput` 落到 `%TEMP%/win-admin/tmp/<name>.err|.out`。
+- **禁止**：`-WindowStyle Normal`（窗口可见，异常红字直接盖在测试窗口上）、`-NoExit`（控制台常驻、抢前台、泄漏进程）、不重定向 stderr（异常无处可去，只能糊屏幕）。
+- **禁止**：在 agent 的探针里 `Start-Process powershell … -NoExit`；要看结果就读 `-RedirectStandardOutput` 的文件。
+- 夹具脚本自己**不许**再弹 UI：几何取不到就写 `err:'not-rendered'` 到 json，同时把异常写 `<name>-error.txt`，别让它冒到 console。
+
+### 9.2 几何 API 必须防御
+
+`PointToScreen` / `TranslatePoint` 对 Collapsed、被 `ClipToBounds` 裁剪、未 Loaded 的元素会抛 `InvalidOperationException`。任何夹具的取值函数都写成返回结构的 `try/catch`：
+
+```powershell
+function P($c) {
+    try {
+        $a = $c.PointToScreen((New-Object System.Windows.Point(0, 0)))
+        $b = $c.PointToScreen((New-Object System.Windows.Point($c.ActualWidth, $c.ActualHeight)))
+        return [ordered]@{ x = [int]$a.X; y = [int]$a.Y; w = [int]($b.X - $a.X); h = [int]($b.Y - $a.Y) }
+    } catch {
+        return [ordered]@{ x = 0; y = 0; w = 0; h = 0; err = 'not-rendered' }
+    }
+}
+```
+
+注意 `PointToScreen` 返回的是**物理像素**，尺寸要用两点差算，不要拿 `ActualWidth`（DIP）当宽高：150% 缩放下两者差 1.5 倍。
+
+### 9.3 巡检：`scripts/ps-doctor.sh`
+
+```bash
+bash scripts/ps-doctor.sh          # 报告：win-admin 相关的 powershell.exe 进程、泄漏清单
+bash scripts/ps-doctor.sh --reap   # 杀掉带 -NoExit / 无主（无 30 分钟内 pid 文件）的泄漏进程
+```
+
+判据：`leaked` 必须为 0。`leaks[]` 里 `noExit:true` 是探针违规，`fixture:true` 但 pid 不在 `$STATE_DIR/*.pid` 里是夹具清扫漏掉了。`powershell` 计数含当次巡检自身的瞬时子进程，别拿它当「有几个夹具」的指标。
+
+新增夹具时把 9.1 的启动段和 9.2 的 `P()` 一起复制过去，然后跑一次 `ps-doctor.sh` 确认 `leaked:0`。
