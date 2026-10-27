@@ -32,6 +32,7 @@ param(
     [switch]$ReadText,
     # ---- T28: scroll container discovery (v1.4) ----
     [switch]$ScrollInfo,
+    [double]$ScrollToPercent = -1,
     # ---- T6: acting ----
     [string]$Action = '',
     [string]$SetValue = '',
@@ -696,6 +697,56 @@ try {
             # element: retry once from the deepest warm-tree element that contains the point.
             $alt = Get-WaElementAtPoint $PointX $PointY
             if ($alt) { $info = Get-WaScrollInfo $alt 10; $el = $alt }
+        }
+
+        # T29: set the scroll position through the provider (fast path). Read the state back: a
+        # call that returns without moving anything is not a scroll (docs/24 rule 2).
+        if ($PSBoundParameters.ContainsKey('ScrollToPercent')) {
+            $ownerEl = $el
+            $ownerSp = $null
+            $dd = 0
+            while ($ownerEl -and $dd -le 10) {
+                $ownerSp = Get-WaPattern $ownerEl 'Scroll'
+                if ($ownerSp) { break }
+                $nx = $null
+                try { $nx = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($ownerEl) } catch { $nx = $null }
+                if (-not $nx) { try { $nx = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($ownerEl) } catch { $nx = $null } }
+                if (-not $nx -or $nx -eq $ownerEl) { $ownerSp = $null; break }
+                $ownerEl = $nx
+                $dd = $dd + 1
+            }
+            if (-not $ownerSp) {
+                $o = [ordered]@{ ok = $false; code = 'ENV_NO_PATTERN'; msg = 'no ScrollPattern on the element or its ancestors'; mode = 'scrollto'; target = (Get-NodeView $el 0) }
+                Out-WaJson (Merge-Ctx $o $ctx)
+                exit 3
+            }
+            $beforeS = Get-WaScrollNumbers $ownerEl
+            $want = [double]$ScrollToPercent
+            if ($want -lt 0) { $want = 0 }
+            if ($want -gt 100) { $want = 100 }
+            $err = $null
+            try { $ownerSp.SetScrollPercent([double]-1.0, [double]$want) } catch { $err = $_.Exception.Message }
+            Start-Sleep -Milliseconds 80
+            $afterS = Get-WaScrollNumbers $ownerEl
+            $ov = Get-NodeView $ownerEl 0
+            $movedOk = $false
+            if ($beforeS -and $afterS -and $null -ne $beforeS.percentY -and $null -ne $afterS.percentY) { $movedOk = [bool]([double]$beforeS.percentY -ne [double]$afterS.percentY) }
+            $o = [ordered]@{
+                ok        = [bool]($null -eq $err)
+                mode      = 'scrollto'
+                hwnd      = ('0x{0:x}' -f $Hwnd)
+                target    = (Get-NodeView $el 0)
+                container = [ordered]@{ name = $ov.name; type = $ov.type; aid = $ov.aid; class = $ov.class; rect = $ov.rect; depth = $ov.depth; patterns = $ov.patterns; scroll = $afterS }
+                requested = $want
+                before    = $beforeS
+                after     = $afterS
+                moved     = $movedOk
+                error     = $err
+            }
+            if ($err) { $o['code'] = 'ENV_ACTION_FAILED' }
+            Out-WaJson (Merge-Ctx $o $ctx)
+            if ($err) { exit 3 }
+            exit 0
         }
         $container = $null
         $via = 'none'

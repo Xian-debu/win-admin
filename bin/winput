@@ -14,6 +14,14 @@ usage:
                               click the center of the Nth text line whose name matches RE,
                               resolved through "wuia --find-text"; the JSON gains hit:{name,rect,...}
                               (T21: text -> geometry -> point, never a blind coordinate).
+  winput click --reveal (--reveal-aid|--reveal-name|--reveal-class) RE [--reveal-index N]
+                        --expect-hwnd H
+                              scroll the target into view first (ops/reveal), then click the point
+                              it proved; the JSON gains reveal:{steps,moved,point,element,container,
+                              scroll}; every step is re-checked, a target that cannot be revealed
+                              is an error (rc=3 ENV_NO_MATCH / ENV_NOT_REVEALED / ENV_SCROLL_NOT_MOVED)
+                              and nothing is injected. --reveal is click-only, needs --expect-hwnd,
+                              and is refused together with X Y or --click-text.
   winput click X Y [--expect-change title|rect[,..]] [--timeout MS]
                               click, then prove the window actually changed (ENV_NO_EFFECT rc=3).
                               Every click reports hit (object, or null + hitReason); every
@@ -59,6 +67,7 @@ DELTA=120; TIMES=1; HORIZ=0; DWELL=600; AT=""
 COMBO=""; HOLD=20; TEXT=""; TF=""; HWND="0"; REAL=0; FOCUS=0; NOCLIP=0; ALLOW_RELATED=0; VERIFY_MODE=""; FORCE=0
 TEXT_SET=0; B64=""; USE_STDIN=0; CLICK_TEXT=""; TIDX=0; HIT_JSON=""
 EXPECT_CHANGE=""; TMO=2000; UNDER_JSON=""; HIT_REASON=""
+REVEAL=0; RVAID=""; RVNAME=""; RVCLASS=""; RVINDEX=0; REVEAL_JSON=""
 HELD_FILE="$APP_ROOT/tmp/held.json"
 
 [ $# -gt 0 ] || { WA_AUDIT_RESULT=ARG_NO_ARGS; usage >&2; exit 2; }
@@ -93,6 +102,11 @@ while [ $# -gt 0 ]; do
     --click-text) CLICK_TEXT="$2"; shift 2 ;;
     --text-index) TIDX="$2"; shift 2 ;;
     --expect-change) EXPECT_CHANGE="$2"; shift 2 ;;
+    --reveal) REVEAL=1; shift ;;
+    --reveal-aid) REVEAL=1; RVAID="$2"; shift 2 ;;
+    --reveal-name) REVEAL=1; RVNAME="$2"; shift 2 ;;
+    --reveal-class) REVEAL=1; RVCLASS="$2"; shift 2 ;;
+    --reveal-index) REVEAL=1; RVINDEX="$2"; shift 2 ;;
     --timeout) TMO="$2"; shift 2 ;;
     -*) WA_AUDIT_RESULT=ARG_UNKNOWN_FLAG; echo "unknown flag: $1" >&2; exit 2 ;;
     *) pos+=("$1"); shift ;;
@@ -104,7 +118,12 @@ case "$ACTION" in
     [ ${#pos[@]} -eq 2 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "move needs X Y" >&2; exit 2; }
     X="${pos[0]}"; Y="${pos[1]}" ;;
   click|dclick)
-    if [ -n "$CLICK_TEXT" ]; then
+    if [ "${REVEAL}" -eq 1 ]; then
+      [ "${ACTION}" = "click" ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "--reveal only applies to click" >&2; exit 2; }
+      [ ${#pos[@]} -eq 0 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "--reveal takes no X Y (the point comes from ops/reveal)" >&2; exit 2; }
+      [ -z "$CLICK_TEXT" ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "--reveal and --click-text are mutually exclusive" >&2; exit 2; }
+      [ "${HWND}" != "0" ] || { WA_AUDIT_RESULT=ARG_NEED_HWND; echo "--reveal needs --expect-hwnd (never click blind)" >&2; exit 2; }
+    elif [ -n "$CLICK_TEXT" ]; then
       [ "$ACTION" = "click" ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "--click-text only applies to click" >&2; exit 2; }
       [ ${#pos[@]} -eq 0 ] || { WA_AUDIT_RESULT=ARG_BAD_POS; echo "--click-text takes no X Y" >&2; exit 2; }
       [ "$HWND" != "0" ] || { WA_AUDIT_RESULT=ARG_NEED_HWND; echo "--click-text needs --expect-hwnd (never click blind)" >&2; exit 2; }
@@ -140,6 +159,41 @@ case "$ACTION" in
   move|click|dclick|drag|wheel|hover|key|keydown|keyup|releaseall|type) ;;
   *) WA_AUDIT_RESULT=ARG_BAD_ACTION; echo "unknown action: $ACTION" >&2; usage >&2; exit 2 ;;
 esac
+
+# T29 (F21): --reveal resolves the element through ops/reveal first, then clicks the point it
+# proved. The reveal already ran a hit-test on that point, so no second wuia --point is needed.
+if [ "${REVEAL}" -eq 1 ]; then
+  RV=()
+  [ -n "${RVAID}" ] && RV+=(--find-aid "${RVAID}")
+  [ -n "${RVNAME}" ] && RV+=(--find-name "${RVNAME}")
+  [ -n "${RVCLASS}" ] && RV+=(--find-class "${RVCLASS}")
+  [ ${#RV[@]} -gt 0 ] || {
+    WA_AUDIT_RESULT=ARG_NEED_REVEAL; echo "--reveal needs --reveal-aid, --reveal-name or --reveal-class" >&2; exit 2; }
+  RVY=()
+  [ "${REAL}" -eq 1 ] && RVY+=(--yes)
+  RJ="$(bash "$REPO_DIR/ops/reveal" --hwnd "${HWND}" "${RV[@]}" --index "${RVINDEX}" "${RVY[@]}")"; RRC=$?
+  if [ $RRC -ne 0 ]; then
+    WA_AUDIT_RESULT="$(printf '%s' "$RJ" | jq -r '.code // "ENV_REVEAL_FAILED"' 2>/dev/null || echo ENV_REVEAL_FAILED)"
+    printf '%s
+' "$RJ"; exit $RRC
+  fi
+  if [ "${REAL}" -eq 0 ]; then
+    # dry-run: report the reveal plan, do not pretend to have a clickable point
+    WA_AUDIT_RESULT=dryrun
+    printf '%s' "$RJ" | jq -c '{ok:true,dry_run:true,plan:"reveal",reveal:.}'
+    exit 0
+  fi
+  X="$(printf '%s' "$RJ" | jq -r '.point.x // empty')"
+  Y="$(printf '%s' "$RJ" | jq -r '.point.y // empty')"
+  if [ -z "$X" ] || [ -z "$Y" ]; then
+    WA_AUDIT_RESULT=EXEC_NO_JSON
+    printf '%s' "$RJ" | jq -c '{ok:false,code:"ENV_REVEAL_NO_POINT",message:"ops/reveal reported success without a point"}'
+    exit 3
+  fi
+  REVEAL_JSON="$(printf '%s' "$RJ" | jq -c '.')"
+  HIT_JSON="$(printf '%s' "$RJ" | jq -c '.hit // empty')"
+  [ -n "$HIT_JSON" ] || HIT_JSON="null"
+fi
 
 # T22 (E18): --expect-change turns "I injected a click" into "the screen changed". Only observable
 # fields that this tool can read without the target app's cooperation are allowed.
@@ -341,6 +395,9 @@ case "$ACTION" in
           else $hit end)}' 2>/dev/null || printf '%s' "$j")"
       if [ -n "$HIT_REASON" ]; then
         j="$(printf '%s' "$j" | jq -c --arg r "$HIT_REASON" '. + {hitReason: $r}' 2>/dev/null || printf '%s' "$j")"
+      fi
+      if [ -n "${REVEAL_JSON}" ]; then
+        j="$(printf '%s' "$j" | jq -c --argjson r "${REVEAL_JSON}" '. + {reveal: $r}' 2>/dev/null || printf '%s' "$j")"
       fi
     fi ;;
   hover|wheel)

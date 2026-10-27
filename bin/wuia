@@ -5,7 +5,7 @@ set -uo pipefail
 . "$(dirname "$0")/../lib/audit.sh"
 wa_audit_init wuia "$@"
 
-LIST=0; HWND=""; TITLE=""; DEPTH=""; MAX=""; FILTER=""; VALUE=0; NOWARM=0; NODEEP=0; WMS=""; WPS=""; FTEXT=""; PMODE="auto"; READTEXT=0; SCROLLINFO=0
+LIST=0; HWND=""; TITLE=""; DEPTH=""; MAX=""; FILTER=""; VALUE=0; NOWARM=0; NODEEP=0; WMS=""; WPS=""; FTEXT=""; PMODE="auto"; READTEXT=0; SCROLLINFO=0; SCROLLTO=""
 FNAME=""; FTYPE=""; FAID=""; FCLASS=""; FENABLED=0; FONSCREEN=0; INDEX=0; LIMIT=20
 PX=""; PY=""; ACT=""; SETV=""; SETV_GIVEN=0
 while [ $# -gt 0 ]; do
@@ -43,6 +43,14 @@ usage:
        no container at all still exits 0 with scrollable:false, so "not scrollable" and
        "not found" cannot be confused.
        ENV_NO_HIT exit 3 for a point over nothing; ENV_NO_MATCH exit 3 for no find match.
+
+  scroll to (T29, v1.4):
+  wuia (--hwnd H | --title RE) --scroll-set-percent N (a find condition) [--index N]
+       move the nearest ScrollPattern owner (self or ancestor) to N percent, then read the state
+       back: {mode:"scrollto", target, container:{...scroll}, requested, before, after,
+       moved:false|true}. moved:false is legal (already there); the caller decides.
+       ENV_NO_PATTERN exit 3 when nothing up the chain scrolls; ENV_ACTION_FAILED exit 3 when the
+       provider throws.
 
   find (T5):
   wuia (--hwnd H | --title RE) --find-name RE [--find-type RE] [--find-aid RE] [--find-class RE]
@@ -89,6 +97,7 @@ EOF
     --point-mode) PMODE="$2"; shift 2 ;;
     --read-text) READTEXT=1; shift ;;
     --scroll-info) SCROLLINFO=1; shift ;;
+    --scroll-set-percent) SCROLLINFO=1; SCROLLTO="$2"; shift 2 ;;
     --invoke|--select|--toggle|--expand|--collapse|--focus|--get-value|--get-text)
       ACT="${1#--}"; shift ;;
     --set-value) ACT="set-value"; SETV="$2"; SETV_GIVEN=1; shift 2 ;;
@@ -135,6 +144,7 @@ args=(wuia -Version "$VERSION" -Limit "$LIMIT" -Index "$INDEX")
 [ "$VALUE" = 1 ] && args+=(-Value)
 [ "$READTEXT" = 1 ] && args+=(-ReadText)
 [ "$SCROLLINFO" = 1 ] && args+=(-ScrollInfo)
+[ -n "$SCROLLTO" ] && args+=(-ScrollToPercent "$SCROLLTO")
 [ -n "$FTEXT" ] && args+=(-FindText "$FTEXT")
 [ -n "$FNAME" ] && args+=(-FindName "$FNAME")
 [ -n "$FTYPE" ] && args+=(-FindType "$FTYPE")

@@ -1,0 +1,264 @@
+#!/usr/bin/env bash
+# ops/reveal - scroll an element into view, then prove it moved and is reachable.
+#
+# Why this exists (docs/24 F20): on real pages the last mile is not "click the element", it is
+# "the element exists in the tree but is outside the scroll container". v1.3 answered that with
+# blind wheel loops over guessed points: 16 iterations reported ok while the panel never moved.
+# reveal fixes the loop, not the recording: every step is verified against the scroll state and
+# the final answer is a geometry proof (element.rect inside container.rect) plus a hit-test of
+# the point a caller would actually click.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-reveal "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/reveal (--hwnd H | --title REGEX) (--find-aid|--find-name|--find-class) RE
+                  [--index N] [--steps N] [--strategy auto|pattern|wheel] [--yes]
+  --find-aid / --find-name / --find-class   which element to bring into view
+  --find-text RE   resolve a text line first, then reveal what carries it (point probe)
+  --index N        which match (0-based) when the regex is ambiguous
+  --steps N        scroll actions allowed before giving up (default 12)
+  --strategy       auto: ScrollPattern first, wheel when the pattern cannot move or is absent
+                   pattern: provider only; wheel: injected wheel only
+  --yes            actually inject. Default is dry-run: the plan only, no events.
+  output: {ok,revealed:true,steps,moved:["pattern"|"wheel",..],point,hit,element,container,
+           scroll:{before,after},via}
+  the point is the element center clamped into the container; hit is what
+  "wuia --point" sees there, so a caller never clicks a coordinate that means something else.
+  exit 0 ok / dry-run | 2 arg | 3 env (ENV_NO_MATCH, ENV_NO_CONTAINER, ENV_SCROLL_NOT_MOVED,
+       ENV_NOT_REVEALED, ENV_HIT_MISMATCH) | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; IDX=0; STEPS=12; STRATEGY=auto; REAL=0
+FNAME=""; FAID=""; FCLASS=""; FTEXT=""
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --find-name) FNAME="$2"; shift 2 ;;
+    --find-aid) FAID="$2"; shift 2 ;;
+    --find-class) FCLASS="$2"; shift 2 ;;
+    --find-text) FTEXT="$2"; shift 2 ;;
+    --index) IDX="$2"; shift 2 ;;
+    --steps) STEPS="$2"; shift 2 ;;
+    --strategy) STRATEGY="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$IDX$STEPS" in *[!0-9]*) echo 'index/steps must be numbers' >&2; exit 2 ;; esac
+case "$STRATEGY" in auto|pattern|wheel) ;; *) echo 'strategy must be auto|pattern|wheel' >&2; exit 2 ;; esac
+[ -n "$FNAME$FAID$FCLASS$FTEXT" ] || { usage >&2; exit 2; }
+[ "$STEPS" -ge 1 ] || { echo 'steps must be >= 1' >&2; exit 2; }
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
+H="$((H))"
+
+QFIND=()
+[ -n "$FNAME" ] && QFIND+=(--find-name "$FNAME")
+[ -n "$FAID" ] && QFIND+=(--find-aid "$FAID")
+[ -n "$FCLASS" ] && QFIND+=(--find-class "$FCLASS")
+PT=""
+if [ -n "$FTEXT" ]; then
+  TL="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-text "$FTEXT" --limit 50)" || { printf '%s\n' "$TL"; exit 5; }
+  LN="$(printf '%s' "$TL" | jq -c --argjson i "$IDX" '.lines[$i] // empty')"
+  if [ -z "$LN" ]; then
+    printf '{"ok":false,"tool":"ops/reveal","code":"ENV_NO_MATCH","msg":"no text line matches the pattern","steps":0}\n'
+    exit 3
+  fi
+  LAID="$(printf '%s' "$LN" | jq -r '.aid // ""')"
+  if [ -n "$LAID" ]; then QFIND+=(--find-aid "^""$LAID""$"); else
+    PT="$(printf '%s' "$LN" | jq -r '[.rect.x + (.rect.w / 2 | floor), .rect.y + (.rect.h / 2 | floor)] | join(",")')"
+  fi
+fi
+
+query() {
+  if [ -n "$PT" ]; then
+    bash "$REPO_DIR/bin/wuia" --hwnd "$H" --scroll-info --point "$PT"
+  else
+    bash "$REPO_DIR/bin/wuia" --hwnd "$H" --scroll-info "${QFIND[@]}" --index "$IDX"
+  fi
+}
+
+pct() { printf '%s' "$1" | jq -r '.container.scroll.percentY // "null"'; }
+
+inside_of() {
+  printf '%s' "$1" | jq -r '
+    if (.element == null) or (.container == null) then "no"
+    else ((.element.rect) as $e | (.container.rect) as $c |
+      if ($e.x >= ($c.x - 2) and $e.y >= ($c.y - 2)
+          and ($e.x + $e.w) <= ($c.x + $c.w + 2) and ($e.y + $e.h) <= ($c.y + $c.h + 2))
+      then "yes" else "no" end) end'
+}
+
+# Where to set the pattern to, from the current geometry: the percent whose content offset puts
+# the element center at the container center. viewHeight (percent of content visible) is what
+# turns pixels into a fraction, so no content height has to be assumed.
+estimate_pct() {
+  printf '%s' "$1" | jq -r '
+    (.element.rect) as $e | (.container.rect) as $c | (.container.scroll) as $s |
+    if ($s == null) or ($s.viewHeight == null) then "null" else
+      ($s.viewHeight) as $vh |
+      ($c.h * 100.0 / $vh) as $contentH |
+      ($contentH - $c.h) as $extent |
+      ($s.percentY // 0) as $p |
+      (($p / 100.0) * $extent) as $cur |
+      (($e.y - $c.y) + ($e.h / 2.0) - ($c.h / 2.0)) as $rel |
+      ((($cur + $rel) / $extent) * 100.0) as $t |
+      ([0, $t] | max | [100, .] | min | . * 100 | round / 100)
+    end'
+}
+
+J="$(query)"; RC=$?
+if [ "$RC" -ne 0 ]; then
+  printf '%s' "$J" | jq -c '. + {tool:"ops/reveal",steps:0}' 2>/dev/null || printf '%s\n' "$J"
+  exit "$RC"
+fi
+OKJ="$(printf '%s' "$J" | jq -r '.ok // false')"
+if [ "$OKJ" != "true" ]; then
+  printf '%s' "$J" | jq -c '. + {tool:"ops/reveal",steps:0}'
+  exit 3
+fi
+CONTAINER_NULL="$(printf '%s' "$J" | jq -r '.container == null')"
+if [ "$CONTAINER_NULL" = "true" ]; then
+  WA_AUDIT_RESULT=ENV_NO_CONTAINER
+  printf '%s' "$J" | jq -c '. + {tool:"ops/reveal",code:"ENV_NO_CONTAINER",msg:"element has no scroll container (nothing to reveal it in)",steps:0}'
+  exit 3
+fi
+
+INSIDE="$(inside_of "$J")"
+PCT0="$(pct "$J")"
+
+# dry-run: report the plan, inject nothing. plannedSteps is what this geometry can need, not a
+# promise: one pattern set usually lands, a wheel path needs a few notches.
+if [ "$REAL" -eq 0 ]; then
+  if [ "$INSIDE" = "yes" ]; then PLAN=0
+  elif [ "$STRATEGY" = "wheel" ] || [ "$(pct "$J")" = "null" ]; then PLAN=$(( STEPS < 4 ? STEPS : 4 ))
+  else PLAN=1
+  fi
+  WA_AUDIT_RESULT=ok
+  printf '%s' "$J" | jq -c --argjson plan "$PLAN" --arg strat "$STRATEGY" '
+    {ok:true,dryRun:true,tool:"ops/reveal",hwnd:.hwnd,plannedSteps:$plan,strategy:$strat,via:.via,
+     element:.element,container:.container,scroll:{before:.container.scroll.percentY,after:.container.scroll.percentY}}'
+  exit 0
+fi
+
+op_pause_gate input
+op_focus "$H" >/dev/null || { FC="$OP_FOCUS_CODE"; [ -n "$FC" ] || FC=ENV_NOT_FOREGROUND; WA_AUDIT_RESULT="$FC"; printf '{"ok":false,"tool":"ops/reveal","code":"%s","msg":"%s"}\n' "$FC" "$OP_FOCUS_MSG"; exit 3; }
+
+MOVED="[]"
+STEP=0
+HIST="[]"
+HOVERTRIED=0
+while [ "$STEP" -lt "$STEPS" ]; do
+  INSIDE="$(inside_of "$J")"
+  [ "$INSIDE" = "yes" ] && break
+  STEP=$(( STEP + 1 ))
+  BEFORE_PCT="$(pct "$J")"
+  ACTION=""
+  if [ "$STRATEGY" != "wheel" ] && [ "$BEFORE_PCT" != "null" ] && [ "$(printf '%s' "$J" | jq -r '.scrollable')" = "true" ]; then
+    WANT="$(estimate_pct "$J")"
+    bash "$REPO_DIR/bin/wuia" --hwnd "$H" --scroll-set-percent "$WANT" "${QFIND[@]}" --index "$IDX" >/dev/null 2>&1 || true
+    J="$(query)"
+    ACTION="pattern"
+  else
+    CX="$(printf '%s' "$J" | jq -r '.container.rect | (.x + (.w / 2 | floor)) | floor')"
+    CY="$(printf '%s' "$J" | jq -r '.container.rect | (.y + (.h / 2 | floor)) | floor')"
+    DIR="$(printf '%s' "$J" | jq -r '((.element.rect.y + .element.rect.h / 2) > (.container.rect.y + .container.rect.h / 2)) as $below | if $below then 1 else -1 end')"
+    # winput: positive delta scrolls away from the user (up), negative scrolls down; the delta
+    # magnitude is not a notch count (measured: -360 moved exactly as far as -120), --times is.
+    # So the sign comes from the direction and the count from the distance in viewport heights
+    # (one notch measured at ~0.2 * viewport in the fixture), capped and re-checked every step.
+    TIMES="$(printf '%s' "$J" | jq -r '(.element.rect) as $e | (.container.rect) as $c | (((($e.y + $e.h / 2) - ($c.y + $c.h / 2))) as $d | (if $d < 0 then -$d else $d end)) as $dist | (($dist / ($c.h * 0.2)) | ceil) | if . < 1 then 1 elif . > 6 then 6 else . end')"
+    DELTA=$(( -120 * DIR ))
+    # winput refuses wheel/hover without --expect-hwnd (S7). Passing it is not ceremony: without it
+    # the primitive exits 2, and a caller that swallows the error records "scrolled" for a no-op.
+    WR="$(bash "$REPO_DIR/bin/winput" wheel --at "$CX,$CY" --delta "$DELTA" --times "$TIMES" --expect-hwnd "$H" --focus --yes)"; WRC=$?
+    if [ "$WRC" -ne 0 ]; then
+      printf '%s' "$WR" | jq -c --argjson st "$STEP" --argjson hist "$HIST" '. + {tool:"ops/reveal",steps:$st,history:$hist}' 2>/dev/null || printf '%s
+' "$WR"
+      exit "$WRC"
+    fi
+    J="$(query)"
+    if [ "$(pct "$J")" = "$BEFORE_PCT" ]; then
+      # nothing moved: the pointer may not have been over the container at all. Hover first,
+      # then one more notch - a provider that cannot move is not a click target (docs/24 rule 2).
+      HOVERTRIED=1
+      HR="$(bash "$REPO_DIR/bin/winput" hover "$CX" "$CY" --dwell 120 --expect-hwnd "$H" --yes)"; HRC=$?
+      if [ "$HRC" -ne 0 ]; then
+        printf '%s' "$HR" | jq -c --argjson st "$STEP" --argjson hist "$HIST" '. + {tool:"ops/reveal",steps:$st,history:$hist}' 2>/dev/null || printf '%s
+' "$HR"
+        exit "$HRC"
+      fi
+      W2="$(bash "$REPO_DIR/bin/winput" wheel --at "$CX,$CY" --delta "$DELTA" --times "$TIMES" --expect-hwnd "$H" --focus --yes)"; W2RC=$?
+      if [ "$W2RC" -ne 0 ]; then
+        printf '%s' "$W2" | jq -c --argjson st "$STEP" --argjson hist "$HIST" '. + {tool:"ops/reveal",steps:$st,history:$hist}' 2>/dev/null || printf '%s
+' "$W2"
+        exit "$W2RC"
+      fi
+      J="$(query)"
+    fi
+    ACTION="wheel"
+  fi
+  AFTER_PCT="$(pct "$J")"
+  MOVED="$(printf '%s' "$MOVED" | jq -c --arg a "$ACTION" '. + [$a]')"
+  HIST="$(printf '%s' "$HIST" | jq -c --argjson s "$STEP" --arg b "$BEFORE_PCT" --arg a "$AFTER_PCT" --arg act "$ACTION" '. + [{step:$s,action:$act,before:(if $b == "null" then null else ($b | tonumber) end),after:(if $a == "null" then null else ($a | tonumber) end)}]')"
+  if [ "$AFTER_PCT" = "$BEFORE_PCT" ] && [ "$ACTION" = "wheel" ] && [ "$HOVERTRIED" -eq 1 ]; then
+    WA_AUDIT_RESULT=ENV_SCROLL_NOT_MOVED
+    printf '%s' "$J" | jq -c --argjson st "$STEP" --argjson hist "$HIST" '
+      {ok:false,tool:"ops/reveal",code:"ENV_SCROLL_NOT_MOVED",
+       msg:"scroll did not move (already at the end, or the pointer never entered the container)",
+       steps:$st,hoverTried:true,history:$hist,via:.via,element:.element,container:.container,
+       scroll:{before:(.container.scroll.percentY),after:(.container.scroll.percentY)}}'
+    exit 3
+  fi
+done
+
+INSIDE="$(inside_of "$J")"
+PCT1="$(pct "$J")"
+if [ "$INSIDE" != "yes" ]; then
+  WA_AUDIT_RESULT=ENV_NOT_REVEALED
+  printf '%s' "$J" | jq -c --argjson st "$STEP" --argjson hist "$HIST" --argjson moved "$MOVED" '
+    {ok:false,tool:"ops/reveal",code:"ENV_NOT_REVEALED",
+     msg:"element is still outside its container after the allowed steps",
+     steps:$st,moved:$moved,history:$hist,via:.via,element:.element,container:.container}'
+  exit 3
+fi
+
+PX="$(printf '%s' "$J" | jq -r '(.element.rect) as $e | (.container.rect) as $c | ([($e.x + $e.w / 2), ($c.x + 2), ($c.x + $c.w - 2)] | sort | .[1] | floor)')"
+PY="$(printf '%s' "$J" | jq -r '(.element.rect) as $e | (.container.rect) as $c | ([($e.y + $e.h / 2), ($c.y + 2), ($c.y + $c.h - 2)] | sort | .[1] | floor)')"
+PJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --point "$PX,$PY")" || { printf '%s\n' "$PJ"; exit 5; }
+ELEM="$(printf '%s' "$J" | jq -c '.element')"
+HITM="$(printf '%s' "$PJ" | jq -c --argjson e "$ELEM" '
+  (.under // null) as $u |
+  if $u == null then {hit:false,under:null} else
+    {hit:(($u.aid != null and $u.aid != "" and $u.aid == $e.aid)
+          or ($u.name != null and $u.name == $e.name)
+          or ([.ancestors[]? | select(.aid != null and .aid != "" and .aid == $e.aid)] | length > 0)),
+     under:{name:$u.name,type:$u.type,aid:$u.aid,rect:$u.rect}}
+  end')"
+HITOK="$(printf '%s' "$HITM" | jq -r '.hit')"
+if [ "$HITOK" != "true" ]; then
+  WA_AUDIT_RESULT=ENV_HIT_MISMATCH
+  printf '%s' "$J" | jq -c --argjson st "$STEP" --argjson moved "$MOVED" --argjson hitm "$HITM" --argjson px "$PX" --argjson py "$PY" '
+    {ok:false,tool:"ops/reveal",code:"ENV_HIT_MISMATCH",
+     msg:"the revealed rect does not hit the element at its center (something else is on top)",
+     steps:$st,moved:$moved,point:{x:$px,y:$py},hit:$hitm.under,via:.via,element:.element,container:.container}'
+  exit 3
+fi
+
+WA_AUDIT_RESULT=ok
+printf '%s' "$J" | jq -c --argjson st "$STEP" --argjson moved "$MOVED" --argjson hitm "$HITM" \
+  --argjson px "$PX" --argjson py "$PY" --arg b "$PCT0" --arg a "$PCT1" '
+  {ok:true,tool:"ops/reveal",hwnd:.hwnd,revealed:true,steps:$st,moved:$moved,
+   point:{x:$px,y:$py},hit:$hitm.under,via:.via,element:.element,container:.container,
+   scroll:{before:(if $b == "null" then null else ($b | tonumber) end),
+           after:(if $a == "null" then null else ($a | tonumber) end)}}'
+exit 0
