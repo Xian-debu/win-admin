@@ -190,3 +190,24 @@ v1.0 的四条绕路（窗口最大化写 PowerShell、悬停菜单靠坐标猜�
 - **`--expect-change` 只认 `title`/`rect`**：不认文本、不认颜色、不认 DOM；要断言「出现/消失」用 `ops/click-element --expect-gone/--expect-alive`，要断言文本落地用 `type --verify`。
 - **冷进程首查 2–3 s 是正常的**：a11y 树异步生长，默认会预热+重试；批量读网页请在**一次调用**里多取，而不是每步起一个新进程（每次冷启动都要付费）。
 - **`--find-text` 的行是 a11y 树视图内的行**：视口外的行 rect 为负，click-by-text 会拒绝（`ENV_HIT_MISMATCH`/`ENV_NO_HIT`）而不是盲点；要滚到位再点。
+
+## 11 · v1.4 滚动与复合录入（T28–T31）
+
+v1.4 的主题是「把一个点放进可滚动容器里、证明容器真的滚了、滚到目标可见再点」——docs/23 里 16 次盲滚的根因。
+
+| 能力 | 状态 | 判据/证据 | 验收 |
+| --- | --- | --- | --- |
+| 滚动容器与状态 `wuia --scroll-info` | ✅ | 返回 `chain`（逐级祖先）+ `container{rect,scroll{percentX,percentY,viewWidth,viewHeight}}` + `via:scroll-pattern\|rect\|none`；WPF 夹具上 `opt-28` 走 pattern、被 `ClipToBounds` 裁掉的文本走几何兜底 | m22 F19-1..4 |
+| 滚到可见 `ops/reveal` | ✅ | 每步重查 `ScrollPercent`，变了才算移动；pattern 快路 + wheel 主路 + hover 重试；收尾用 `wuia --point` 证明落点命中目标；滚不动 `ENV_SCROLL_NOT_MOVED`、步数用尽 `ENV_NOT_REVEALED`、已是可见 `steps:0` 且不注入 | m23 F20-1..6 |
+| 滚动 + 点击一条命令 `winput click --reveal` | ✅ | 内部调 `ops/reveal` 并用它证明过的点注入，JSON 同时带 `reveal` 与 `hit`；与 X Y / `--click-text` 互斥、必须 `--expect-hwnd` | m23 F20-7 |
+| 选择类控件 `ops/select-option` | ✅ | `panel`（页内展开）与 `native`（独立顶层弹层，`GW_OWNER` 是主窗）双路径，`mode:"auto"` 先 native 后 panel；`--expect-value` 读回见证元素，不符 `ENV_NO_EFFECT`；失败 `ENV_NO_OPTION` 带 `tried` | m24 F21-1..5 |
+| 串行录入三件套 | ✅ | `ops/chip-add`（chip 数 +1 且内容相等且输入框清空，Enter 被吞自动 `enter-again`）、`ops/rich-write`（点击+全选+粘贴+前缀回读，指定 verify 目标时不退回整窗正文）、`ops/wait-ready`（存在且已布局，`lastCount` 区分没出现/没布局） | m25 F22-1..4 |
+| 弹层发现 `wwin list --owned-by/--include-empty` | ✅ | 空标题但 `GW_OWNER` 非零的可见顶层窗 = 弹层；每次展开句柄都会变，所以按 owner 现查而不是缓存 | m24 F21-2 |
+
+新增硬限制：
+
+- **`via` 只说这次是怎么判断的，不说谁对**：`scroll-pattern` 是 UIA 实现（能拿到百分比），`rect` 是几何兜底（只能判断「越界了」）。两者都没有 = `none`，此时 `ops/reveal` 会直接拒绝而不是盲滚。
+- **点必须落在目标窗口内**：`wuia --point` 先 `SetForegroundWindow` 再 `FromPoint`；夹具窗口被别的窗压住时命中的是压在上面的窗，`ops/reveal` 因此内置 `op_focus`。
+- **默认 dry-run**：`ops/reveal` / `ops/select-option` / `ops/chip-add` / `ops/rich-write` 都要 `--yes`；dry-run 只报计划（滚几步、点哪里、预期值），不注入、不需要 input grant。
+- **每一步都要正面证据**：`ScrollPercent` 必须变、「见证值」必须变、chip 数必须 +1；`ok:true` 只代表注入了，不代表生效了。
+- **`hit` 仍是 a11y 语义**：`ENV_HIT_MISMATCH` 是「证明不了落点属于目标」，不是像素断言失败。

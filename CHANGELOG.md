@@ -3,6 +3,33 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循语义化版本。首个正式版在 M5 冻结为 1.0.0；此前 0.x 不承诺接口稳定。
 
+## [1.4.0] - 2026-10-27
+
+主题：**把「能找到」推进到「能滚到位、点得准」**。依据 `session-dd79939d`（用 v1.3.0 一天投 7 集 B 站稿件的取证，16 次盲滚、4 条用户原话）写成的 `docs/23`，按 `docs/24` 的冻结判据（F19–F22 / S20）实施 T28–T33。
+
+### Added
+- **滚动容器与状态**：`wuia --scroll-info [--point X,Y]` 返回祖先链、最近可滚容器的 `rect/patterns/scroll{percentX,percentY,viewWidth,viewHeight}`，并用 `via:"scroll-pattern"|"rect"|"none"` 说清「这次是靠 UIA 实现判的、还是几何兜底、还是判不了」。WPF 夹具实测：列表项走 `scroll-pattern`，被 `ClipToBounds` 裁掉的文本走 `rect`。
+- **滚到目标可见**：`ops/reveal --hwnd H (--find-aid|--find-name|--find-text|--find-class) RE [--index N] [--steps 12] [--yes]`。ScrollPattern 快路 + wheel 主路，**每一步都重查 `ScrollPercent`，变了才算移动**；滚不动 `ENV_SCROLL_NOT_MOVED`（带 `history`、`hoverTried`）、步数用尽 `ENV_NOT_REVEALED`、本来可见则 `steps:0` 且不注入。收尾用 `wuia --point` 证明落点命中目标（`ENV_HIT_MISMATCH`）。默认 dry-run。
+- **滚动 + 点击一条命令**：`winput click --reveal (--reveal-aid|--reveal-name|--reveal-class) RE --expect-hwnd H --yes`，JSON 同时给 `reveal{steps,moved,point,element,container,scroll}` 与 `hit`；与 X Y / `--click-text` 同用拒绝（rc=2）。
+- **选择类控件**：`ops/select-option --hwnd H --trigger RE --option RE [--expect-value RE] [--mode auto|panel|native] [--timeout 4000] [--yes]`。`panel`（页内展开）与 `native`（独立顶层弹层，`GW_OWNER` 指向主窗）双路径，`auto` 先 native 后 panel；`--expect-value` 读回见证元素（不符 `ENV_NO_EFFECT`）；失败 `ENV_NO_OPTION` 带 `tried` 并用 Esc 收尾。视口外选项自动 `ops/reveal`（`steps` 记滚动步数）。
+- **串行录入三件套**：`ops/chip-add`（输入 → Enter → 复核 chip 数/内容/输入框清空，Enter 被吞自动 `enter-again`，两次失败 `ENV_CHIP_MISMATCH` 带 `chips/glued/attempts`）、`ops/rich-write`（点入 + `ctrl+a` + 粘贴 + 前缀回读，`ENV_TEXT_NOT_ENTERED`）、`ops/wait-ready`（等「存在且已布局」，`ENV_TIMEOUT` 用 `lastCount` 区分没出现/没布局）。
+- **弹层发现**：`wwin list --owned-by H --include-empty` —— 空标题但 `GW_OWNER` 非零的可见顶层窗就是弹层（每次展开句柄都变，按 owner 现查）。
+- **PowerShell 调用纪律**：`scripts/ps-doctor.sh` 巡检「该退出却没退出」的 pwsh/powershell 进程（`noExit`/`fixture` 分类，`--reap` 可回收）；全部夹具启动改 `-WindowStyle Hidden` + 输出重定向到文件 + 火忘式发射。
+- 新夹具 `selectwin`、`chipwin`，`scrollwin` 扩展（30 项列表 + 可滚容器 + 被裁剪文本）；验收 `check-m22`/`m23`/`m24`/`m25`/`m27`；判据 F19–F22/S20 写进 `docs/07`；新文档 `docs/25-recipes-bili.md`（B 站投稿配方：两条上传路径、分区、标签、简介、封面、水印、提交前复核、错误码处置）；`docs/04` 增 §11。
+
+### Changed
+- `wuia` 的 `PatternDefs` 补 `ScrollPattern`：此前任何元素都永远 `scrollable:false`（首轮 scroll-info 全 false 的根因）。
+- 夹具脚本 `P()` 改物理像素（两点相减）并全部包 `try/catch`：未渲染的 Border/被裁剪的 TextBlock 不再抛 `PointToScreen` 异常、不再在测试窗上糊一片红色报错；失败写 `scrollwin-error.txt` + `FIXTURE_LOAD_FAIL`。
+- 八个 `tests/helpers/*-start.sh` 不再等 `winps` 的输出流结束（子进程继承 stdout 句柄 → 每次卡满 30 秒，K73），改火忘式发射 + 从夹具 JSON 回填 pid：单夹具启动 30.7 s → 1.688 s。
+- `SKILL.md` → v1.4.0；`docs/11` 增 K72（可见控制台抢前台/报错糊窗口）、K73（等 winps 输出流卡 30 秒）；`docs/08` 增 §9.4「起长寿命进程时不要等 winps 的输出流」。
+
+### Fixed
+- 夹具窗口上出现 `使用"1"个参数调用"PointToScreen"时发生异常` 的 PowerShell 红字、且控制台常驻抢前台（K72 的直接后果）：现已静默启动 + 异常兜底。
+- `ops/reveal` 首版把注入失败吞进 `2>/dev/null || true`，会记录「滚过了但没动」——现在注入错误一律原样透传。
+
+### 验收
+- 全表回归（串行，每套件自签 grant）：m1 16/0、m2 11/0、m3 20/0、m4 13/0、m5 7/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、m16 10/0（1 SKIP）、m17 10/0（1 SKIP）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（1 SKIP）、m22 7/0、m23 8/0、m24 8/0、m25 10/0、m27 SKIP rc=0；合计 **276 条断言通过 / 0 失败 / 18 SKIP**（另 m27 整套 SKIP：无可见投稿页，见 `docs/25` §10）；`scripts/check-release.sh` pass=yes；报告 `tests/reports/2026-10-27-v1.4.md`。
+- 真实站点：本轮机器上没有可见的 B 站投稿页，`check-m27` 按口径整套 SKIP（rc=0、`reason:NO_BILIBILI_WINDOW`），夹具彩排如实报出「chip 撤不掉」——live 证据仍缺一轮，见 `docs/25` §10。
 ## [1.3.0] - 2026-10-25
 
 主题：**把「能点」推进到「知道点到了什么」**。依据 `session-c022d2c2`（v1.2.0 的第一次实战：B 站投稿草稿）的 7 条取证（`docs/21`），按 `docs/22` 的冻结判据实施 T20–T26。

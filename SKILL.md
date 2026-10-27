@@ -1,19 +1,21 @@
 ---
 name: win-admin
 description: >-
-  从 WSL2/DSH 一侧接管 Windows 桌面的操作手册（/root/win-admin 工程，v1.3.0）：
+  从 WSL2/DSH 一侧接管 Windows 桌面的操作手册（/root/win-admin 工程，v1.4.0）：
   只读侦察（wdiag 环境快照、wshot 物理像素截图/区域/窗口/标尺网格、wuia UIA 树与语义查找、wwin 窗口列表/信息/激活/关闭/状态控制）、
   合成输入（winput 点击/输入/按键/长按/悬停/滚轮/拖拽、wclip 剪贴板）、等待（wwait 窗口、wait-for 控件、wait-uia 谓词）、
   元素级动作（wuia --invoke/--select/--toggle/--expand/--set-value）、复合操作（open、find-and-click、fill、click-element、hover-menu、wait-for）、
   元素地图（ops/map：编号 + 红框图 + 清单）、结果断言（click-element --expect-gone/--expect-alive）、
   坐标契约（wshot --box/--clip/--out 的 WSL 路径映射 + scale 字段）、输入回读（winput type --verify）与焦点门（type --force）、窗口族匹配（--allow-related）、
   页面正文（wuia --read-text / ops/read-text）、文本行与按文本点击（--find-text / winput --click-text）、点击效果断言（--expect-change）、
+  滚动容器与滚到可见（wuia --scroll-info / ops/reveal / winput click --reveal）、选择类控件（ops/select-option 的 panel/native 双路径）、
+  串行录入（ops/chip-add 标签、ops/rich-write 富文本、ops/wait-ready 等就绪）、弹层发现（wwin list --owned-by/--include-empty）、
   以及守卫层（grant.json 限时授权、pause.flag 急停、audit jsonl 逐动作留痕、危险名默认拒绝）。
   当任务需要操作 Windows 图形界面（点击、输入、截图、窗口管理、UIA 自动化）时使用；纯命令行/文件操作不需要它。
 user-invocable: true
 ---
 
-# win-admin：从 WSL 接管 Windows 桌面（v1.3.0）
+# win-admin：从 WSL 接管 Windows 桌面（v1.4.0）
 
 工程根目录固定在 **/root/win-admin**（WSL 内）。所有命令都在该目录下执行：
 
@@ -51,9 +53,9 @@ bash guard/grant.sh revoke
 | --- | --- | --- | --- |
 | `bin/wdiag` | 环境快照 | `--json` | screen w/h、dpi、scale、session、locked、gui_available、payload version |
 | `bin/wshot` | 物理像素截图 | `--out PATH` `--rect X,Y,W,H` `--box X1,Y1,X2,Y2` `--clip` `--hwnd H` `--grid N` | path、wsl_path、w、h、bytes、sha256、scale、rect、clipped |
-| `bin/wuia` | UIA 树/语义查找/动作 | `--hwnd H --find-name RE --find-type RE --find-aid RE --find-class RE --enabled --on-screen --index N --limit N`；动作 `--invoke/--select/--toggle/--expand/--collapse/--focus/--get-value/--get-text/--set-value TEXT`；`--point X,Y [--point-mode auto|rect|uia]` 问坐标下是什么、`--find-text RE` 页面文本行索引（行 + rect + depth + clickable）、`--read-text` 整页正文（最长 TextPattern 文档）、预热开关 `--no-warm/--no-deepen/--warm-ms/--warm-passes`；`--depth/--max` 不传时自动（find 20 / tree 3，首次落空自动加深到 28） | nodes[]（name/type/aid/class/rect/enabled/patterns[]）、`lines[]`/`text`/`chars`、`passes/warmMs/depthUsed/deepened/warmRetries`、动作返回回读状态 |
-| `bin/wwin` | 窗口表/信息/激活/关闭/状态 | `list` `info --hwnd H` `focus --hwnd H` `close --hwnd H` `state --hwnd H` `set --hwnd H [--state max|restore|min|normal] [--x --y --w --h] [--topmost on|off] [--yes]` | windows[]、before/after placement 与 rect |
-| `bin/winput` | 合成输入 | `click X Y` `type --stdin` `type --text-b64` `type --text-file`（WSL/Windows 路径均可）`type --verify [--verify-mode exact|contains]` `key ctrl+s [--hold MS]` `keydown/keyup/releaseall` `hover X Y [--dwell MS]` `wheel --at X Y --delta N` `drag X1 Y1 X2 Y2`、`click --click-text RE [--text-index N]`（按页面文本点）、`--expect-change title|rect [--timeout MS]`（点击效果断言）、`type --force`（越过焦点门，旧行为）；均带 `--expect-hwnd H --yes`，可加 `--allow-related` | ok、point、injected、`hover` 返回落点元素、`verify{}` 回读、`matched` |
+| `bin/wuia` | UIA 树/语义查找/动作 | `--hwnd H --find-name RE --find-type RE --find-aid RE --find-class RE --enabled --on-screen --index N --limit N`；动作 `--invoke/--select/--toggle/--expand/--collapse/--focus/--get-value/--get-text/--set-value TEXT`；`--scroll-info [--point X,Y]` 问这里的滚动容器与滚动百分比（`via:scroll-pattern|rect|none`）、`--point X,Y [--point-mode auto|rect|uia]` 问坐标下是什么、`--find-text RE` 页面文本行索引（行 + rect + depth + clickable）、`--read-text` 整页正文（最长 TextPattern 文档）、预热开关 `--no-warm/--no-deepen/--warm-ms/--warm-passes`；`--depth/--max` 不传时自动（find 20 / tree 3，首次落空自动加深到 28） | nodes[]（name/type/aid/class/rect/enabled/patterns[]）、`lines[]`/`text`/`chars`、`passes/warmMs/depthUsed/deepened/warmRetries`、动作返回回读状态 |
+| `bin/wwin` | 窗口表/信息/激活/关闭/状态 | `list [--owned-by H] [--include-empty]`（弹层发现）`info --hwnd H` `focus --hwnd H` `close --hwnd H` `state --hwnd H` `set --hwnd H [--state max|restore|min|normal] [--x --y --w --h] [--topmost on|off] [--yes]` | windows[]、before/after placement 与 rect |
+| `bin/winput` | 合成输入 | `click X Y` `type --stdin` `type --text-b64` `type --text-file`（WSL/Windows 路径均可）`type --verify [--verify-mode exact|contains]` `key ctrl+s [--hold MS]` `keydown/keyup/releaseall` `hover X Y [--dwell MS]` `wheel --at X Y --delta N` `drag X1 Y1 X2 Y2`、`click --reveal (--reveal-aid|--reveal-name|--reveal-class) RE`（先滚到可见再点，T29）、`click --click-text RE [--text-index N]`（按页面文本点）、`--expect-change title|rect [--timeout MS]`（点击效果断言）、`type --force`（越过焦点门，旧行为）；均带 `--expect-hwnd H --yes`，可加 `--allow-related` | ok、point、injected、`hover` 返回落点元素、`verify{}` 回读、`matched` |
 | `bin/wclip` | 剪贴板 | `set --text T` `set --text-file F` `set --native-path P`（`/mnt/c/...` → `C:\...`）`get` | text、bytes |
 | `bin/wwait` | 等窗口出现 | `--title RE --timeout 10` | hwnd、elapsed_ms |
 
@@ -86,6 +88,21 @@ ops/wait-for     --hwnd 1234 --uia-name "^是否要将更改保存" --timeout 5
 - `--allow-related`：目标与命中窗口互为祖先/后代（典型的「文件名无效」子对话框）才算匹配，成功 JSON 标 `matched:"related"`。**默认关**，默认仍是严格相等。
 - `ops/*` 成功 JSON 都带 `statePreserved:true`：聚焦只改前台，不改窗口的 placement（最大化窗口不会被 `SW_RESTORE` 打回窗口化）。
 
+```bash
+# v1.4：滚动、选择、串行录入（全部默认 dry-run，--yes 才注入）
+ops/reveal       --hwnd 1234 --find-aid '^opt-28$' --steps 12 --yes        # 滚到元素可见（pattern 快路 + wheel 主路）
+ops/select-option --hwnd 1234 --trigger '^分区$' --option '^科技数码$' \
+                 --expect-value 'region:科技数码' --mode auto --yes      # panel/native 双路径 + 回读见证值
+ops/chip-add     --hwnd 1234 --input '^标签输入框$' --list '^标签列表$' --value 'LoongArch' --yes
+ops/rich-write   --hwnd 1234 --point 1280,696 --text-file /tmp/intro.txt \
+                 --verify-aid '^简介编辑器$' --yes                       # 点击 + ctrl+a + 粘贴 + 回读校验
+ops/wait-ready   --hwnd 1234 --require '^上传完成$' --timeout 120000      # 等到「存在且已布局」
+```
+
+- **滚到可见一条命令**：`winput click --reveal --reveal-name '^完成$' --expect-hwnd H --yes` 把「测容器 → 滚 → 证明命中 → 注入」串起来；滚不动是 `ENV_SCROLL_NOT_MOVED`，步数用尽 `ENV_NOT_REVEALED`，**不会**盲滚。
+- **每一步都要正面证据**：`ScrollPercent` 必须变、`--expect-value` 必须变、chip 数必须 +1；`ok:true` 只代表注入了。
+- **选择类控件的弹层可能是独立顶层窗**：`bin/wwin list --owned-by H --include-empty` 能看到（空标题但 `GW_OWNER` 非空），且每次展开句柄都变——按 owner 现查，不要缓存。
+- **B 站投稿的完整配方**（两条上传路径、分区、标签、简介、封面、水印）：`docs/25-recipes-bili.md`。
 ## 4. 五步配方（通用任务骨架）
 
 1. **看**：`bin/wshot --out /tmp/s.png`（要看坐标就加 `--grid 100`，`--out` 给 WSL 路径会自动映射并回拷）读图确认桌面；`bin/wdiag` 确认未锁屏、分辨率与 DPI；网页正文用 `ops/read-text --hwnd H` 或 `bin/wuia --hwnd H --read-text`。
@@ -114,6 +131,12 @@ ops/wait-for     --hwnd 1234 --uia-name "^是否要将更改保存" --timeout 5
 | 窗口自己从最大化变回窗口化 | v1.1 的 `Set-WaForeground` 无条件 `SW_RESTORE` 干的（K51）；v1.2 已修，旧脚本若自己写 `ShowWindow(9)` 要删掉 |
 | 按界面代码里的坐标点，差 1.5 倍 | DIP ≠ 物理像素（K53）：150% 缩放差 1.5 倍；坐标只从 UIA `rect` 或 `wwin state` 取 |
 | `--find-name .` 数出来的元素比看见的少 | 名字为空的控件（Edit/ComboBox/容器）不会被 `--find-name` 命中（K49）；数元素用 `--find-type .` |
+| 坐标点了没反应 / 隔一会才生效 | 滚动会让旧坐标失效：用 `winput click --reveal …` 每条命令现取现点，别把 rect 存起来复用 |
+| 滚轮滚了但页面没动 | `ENV_SCROLL_NOT_MOVED` 说明指针没在容器里或需要先 hover；先 `wuia --scroll-info --point X,Y` 看容器是谁，再 `ops/reveal` |
+| 下拉框的选项在 `wwin list` 里看不到 | 它是独立顶层弹层（空标题 + `GW_OWNER`=主窗）：`wwin list --owned-by H --include-empty`；每次展开 hwnd 都变 |
+| 标签粘成一坨（`科LoongArch技史`） | 用 `ops/chip-add`（输入 + Enter + 复核 chip 数与内容），不要手工 `type` + `enter` |
+| Quill/contenteditable 读不到 Value | `ops/rich-write` 整段粘贴 + 前缀回读；会话里别改用 `type --verify`（会 `ENV_TEXT_UNVERIFIABLE`）|
+| 稿件管理直链白屏 | 壳路由：从创作中心点进去，再用 `ops/wait-ready --require` 等真内容，不要 `sleep` |
 | 子对话框里的按钮点不动（`ENV_WINDOW_MISMATCH`） | 它是目标的子/父窗口：加 `--allow-related`；报错 JSON 的 `hit` 会告出「挡在前面的是谁」 |
 
 | 页面点了没反应，却报 `ok:true` | v1.3 前 click 不判后果：加 `--expect-change title`（或 `rect`），超时 `ENV_NO_EFFECT`；命中的是谁看 `hit{}`，`hit:null` 表示落点没有元素（`hitReason` 给原因） |
@@ -170,7 +193,7 @@ mission **不是**新的授权通道——守卫层照旧（grant/pause/audit）
 2. **标题/简介用安全通道**：`bin/winput type --stdin <<'TXT' … TXT`；含半角单引号的标题一律不要走 `--text`。
 3. **上传文件对话框**：`wclip set --native-path "C:/绝对路径"`（自动转反斜杠，原生对话框只认 `\`）→ `winput key ctrl+v` → `enter`（原生对话框只吃粘贴，不吃 type）。若弹「文件名无效」，先看是不是缺了 `--native-path`。
 4. **平台默认标签**：先逐个删（选中 + `Delete`），再加自己的（输入 + `Enter`）；每删一个都重新定位、并带 `--expect-gone <标签名>` 断言它真的没了（不要复用上一次坐标，chip 会漂移）。
-5. **分区/分类下拉**：`wwin` 摆好窗口后用截图定位一级项（`--grid 100` 读坐标），能 `--expand` 就走 UIA；
+5. **分区/分类下拉**：v1.4 起一条命令——`ops/select-option --trigger '^分区$' --option '^科技数码$' --expect-value 'region:科技数码' --yes`（内部会 reveal 滚动 + 回读）；
    **二级 hover 菜单在 Chromium 里可能不进 UIA 树**：`ops/hover-menu --at X,Y --pick RE` 不行就只选一级项，并在报告里写明「二级不可达」，不要用坐标硬猜（c0 会话在这里耗了 300+ 行）。
 6. **提交前**：截图 + `wuia --get-text` 核对标题/分区/封面，再点「立即投稿」；投稿后用进度页 URL 取 BV 号作为证据。
 

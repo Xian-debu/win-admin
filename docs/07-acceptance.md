@@ -312,6 +312,47 @@
 - **判据**：对已打开的真实浏览器（不重启、不切标签、不注入）只读冒烟：`--find-text` 有足够几何行、`--find-type Edit` 有结果、页面文本行中心 `--point` 命中（rect 含点）、暖树 `--find-name` ≤ 5 s；无浏览器时整份 SKIP、不判失败。
 - 实测：m21 4/0（1 SKIP）—— 用户 Edge `0x90cdc`：`--find-text '.' --limit 120` total=174、几何行 120、`depth>=8` 行 88、2743 ms；`--find-type Edit` total=4；`--point 391,195` → `TabItem "对话"`、`via:"rect-hit"`、rect 含点；暖树 2162 ms；B 站断言因活动标签不是 B 站而 SKIP（不切标签）。
 - 状态：✅ 通过（2026-10-25）
+### F19 · 滚动容器与滚动状态（v1.4）
+
+`bin/wuia --hwnd H --scroll-info [--point X,Y | --find-aid RE ...]`（全文见 `docs/24-v1.4-plan.md` §3）
+
+- F19-1 命中可滚动容器：`scrollable:true`、`via` 为 `scroll-pattern`/`rect`、`container{name,type,rect,patterns}`、`scroll{percentY,viewHeight}`，rc=0。
+- F19-2 命中不可滚动元素：`scrollable:false`、`container:null`，rc=0（不是错误）。
+- F19-3 点空白：rc=3 `ENV_NO_HIT`。
+- F19-4 `via` 如实：pattern 可用 → `scroll-pattern` 且 `percentY` 是数字；否则 `rect` 且 `percentY:null`，但 `container` 仍给最近裁剪祖先。
+
+### F20 · reveal：滚到目标可见（v1.4）
+
+`ops/reveal --hwnd H (--find-aid|--find-name|--find-text|--find-class) RE [--index N] [--steps 12] [--yes]`；`winput click --reveal …` 是它的点击一体形态。
+
+- F20-1 目标在容器下方：`{ok,revealed:true,steps,moved,point,element,container,scroll{before,after},via}`，rc=0；`element.rect ⊆ container.rect`（±2px）；`point` 的 hit-test 命中该元素/后代/可点祖先。
+- F20-2 幂等：再跑一次 `steps:0`、`moved:[]`，**不注入任何事件**。
+- F20-3 目标不存在：rc=3 `ENV_NO_MATCH`、`steps:0`。
+- F20-4 滚不动：rc=3 `ENV_SCROLL_NOT_MOVED`，带 `history`（含 `before/after`）与 `hoverTried:true`；不得谎报 revealed。
+- F20-5 步数用尽：rc=3 `ENV_NOT_REVEALED`，带 `steps` 与 `history`。
+- F20-6 dry-run：rc=0、`dryRun:true`、`plannedSteps`、**无** `revealed` 字段、不注入、不需要 input grant。
+- F20-7 `winput click --reveal`：JSON 带 `reveal` 与一致的 `hit`；可与 `--expect-change` 同用；与 X Y / `--click-text` 同用或非 click → rc=2。
+
+### F21 · 选择类控件（v1.4）
+
+`ops/select-option --hwnd H --trigger RE --option RE [--expect-value RE] [--mode auto|panel|native] [--timeout 4000] [--yes]`
+
+- F21-1 面板型：`{ok,mode:"panel",clicked,value{before,after},matches:true,closed:true,steps}`，rc=0。
+- F21-2 原生弹层型（独立顶层 HWND，`GW_OWNER`= 主窗）：`mode:"native"`，JSON 回报 `popup{hwnd,title,class}`，点击走 `--allow-related` 语义。
+- F21-3 选项不存在：rc=3 `ENV_NO_OPTION`、`steps:0`、`tried:["panel","native"]`，并用 Esc 关弹层（`closed` 如实）。
+- F21-4 回读不符：rc=3 `ENV_NO_EFFECT`，带 `value.before/after`。
+- F21-5 视口外选项：必须先 reveal 再点，`steps>=1`；直接点 raw rect 不算通过。
+
+### F22 · 串行录入（v1.4）
+
+- F22-1 `ops/chip-add`：`chipsBefore=k → chipsAfter=k+1`、`added==value`、无并字 chip。
+- F22-2 输入被吞 → 自动重试一次（`retried:1`）且仍 `k+1`；两次失败 → rc=3 `ENV_CHIP_MISMATCH` 带 `chips`。
+- F22-3 `ops/rich-write`：点入 + `ctrl+a` + 粘贴 + 回读，前缀比较 `matched:true`；不符 rc=3 `ENV_TEXT_NOT_ENTERED`。
+- F22-4 `ops/wait-ready`：`{ok,polls,elapsedMs,matched{name,rect}}`；超时 rc=3 `ENV_TIMEOUT` 带 `lastCount`（0=没出现，>0=出现未布局）。
+
+### S20 · 真实站点冒烟（v1.4）
+
+真实 Edge、B 站投稿页、**零副作用**：S20-1 分区下拉 reveal 到可见后 Esc；S20-2 加一个测试标签再复原；S20-3 水印开关切两次回初值；S20-4 前后 `wwin list` 一致，不点提交类按钮。无 Edge/非投稿页 → 整份 SKIP（exit 0）。
 ### S10 · 默认行为不变
 
 - **判据**：不传新开关时，`winput` 的匹配/校验行为、`wshot --rect` 语义、`ops/*` 输出（除新增字段）与 v1.1.0 一致。
@@ -337,6 +378,7 @@
 | **M8 v1.1** | E9–E12 + C9–C13 + S9 + E1–E8 回归 | ✅ 2026-10-24 冻结 v1.1.0（m1 16/0（skip=15：C3 最小化窗口 + 14 条非本里程碑占位）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 7/0、m10 17/0、m11 14/0、m12 11/0、release pass=yes；报告 `tests/reports/2026-10-24-m8.md`） |
 | **M10 v1.2** | E13–E15 + C14–C16 + S10–S11 + E1–E12 回归 | ✅ 2026-10-24 冻结 v1.2.0（m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、release pass=yes；报告 `tests/reports/2026-10-24-m9.md`） |
 | **M11 v1.3** | E16–E18 + C17–C19 + E1–E15 回归 | ✅ 2026-10-25 冻结 v1.3.0（新判据 m16 10/0（1 SKIP）、m17 10/0（1 SKIP）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（1 SKIP）；全表回归 m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 6/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、release pass=yes，共 **242 条断言通过 / 0 失败 / 18 SKIP**；报告 `tests/reports/2026-10-25-v1.3.md`） |
+| **M12 v1.4** | F19–F22 + S20 + E1–E18 回归 | ✅ 2026-10-27 冻结 v1.4.0（新判据 m22 7/0、m23 8/0、m24 8/0、m25 10/0、m27 整套 SKIP rc=0（无可见投稿页，`reason:NO_BILIBILI_WINDOW`）；全表回归 m1 16/0（skip=15）、m2 11/0、m3 20/0、m4 13/0、m5 7/0（含 E8 10/10）、m6 10/0、m7 9/0、m8 7/0、m9 8/0、m10 17/0、m11 19/0、m12 20/0、m13 13/0、m14 10/0、m15 8/0、m16 10/0（1 SKIP）、m17 10/0（1 SKIP）、m18 10/0、m19 10/0、m20 11/0、m21 4/0（1 SKIP）、release pass=yes，共 **276 条断言通过 / 0 失败 / 18 SKIP**；报告 `tests/reports/2026-10-27-v1.4.md`） |
 | **M9 网页语义** | 覆盖率报告（UIA 文本 / CDP innerText / 剪贴板基线） | 只出结论，不改主链路 |
 
 ## 验收记录规范
