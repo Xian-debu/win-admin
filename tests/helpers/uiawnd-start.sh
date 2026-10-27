@@ -9,8 +9,8 @@ TITLE="${1:-wa-uia}"
 mkdir -p "$APP_ROOT/tmp"
 WIN="${WINADMIN_APP_ROOT:-/mnt/c/Users/Public/win-admin}"
 cp "$(dirname "$0")/uiawnd.ps1" "$WIN/tmp/wa-uiawnd.ps1"
-rm -f "$WIN/tmp/uiawnd.json" "$WIN/tmp/uiawnd-events.txt"
-winps -t 30 "Start-Process -FilePath powershell.exe -ArgumentList '-NoProfile','-STA','-WindowStyle','Normal','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-uiawnd.ps1")','-Title','$TITLE' -PassThru | Select-Object -ExpandProperty Id" | tail -1 > "$STATE_DIR/uiawnd.pid" 2>/dev/null
+rm -f "$WIN/tmp/uiawnd.json" "$WIN/tmp/uiawnd.err" "$WIN/tmp/uiawnd.out" "$WIN/tmp/uiawnd-error.txt" "$WIN/tmp/uiawnd-events.txt"
+winps -t 30 "Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-uiawnd.ps1")','-Title','$TITLE' -RedirectStandardError '$(wa_winpath "$WIN/tmp/uiawnd.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/uiawnd.out")' -PassThru | Select-Object -ExpandProperty Id" | tail -1 > "$STATE_DIR/uiawnd.pid" 2>/dev/null
 for i in $(seq 1 80); do
   [ -s "$WIN/tmp/uiawnd.json" ] && jq -e . "$WIN/tmp/uiawnd.json" >/dev/null 2>&1 && break
   sleep 0.25
