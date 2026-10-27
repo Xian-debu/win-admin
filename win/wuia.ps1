@@ -30,6 +30,8 @@ param(
     [string]$FindText = '',
     [string]$PointMode = 'auto',
     [switch]$ReadText,
+    # ---- T28: scroll container discovery (v1.4) ----
+    [switch]$ScrollInfo,
     # ---- T6: acting ----
     [string]$Action = '',
     [string]$SetValue = '',
@@ -64,6 +66,7 @@ $script:PatternDefs = @(
     @{ name = 'Toggle';         p = [System.Windows.Automation.TogglePattern]::Pattern },
     @{ name = 'ScrollItem';     p = [System.Windows.Automation.ScrollItemPattern]::Pattern },
     @{ name = 'Text';           p = [System.Windows.Automation.TextPattern]::Pattern }
+    @{ name = 'Scroll';        p = [System.Windows.Automation.ScrollPattern]::Pattern }
 )
 
 function Get-WaPatterns($e) {
@@ -239,6 +242,146 @@ function Get-WaRectHit([int]$x, [int]$y) {
         rect = $best.rect; depth = $best.depth; via = 'rect-hit'
         actionable = (Test-WaActionable $best)
     }
+}
+
+# T28 (v1.4): the scroll state of one element, or $null when it has no ScrollPattern.
+# UIA reports "unknown" percent as -1; callers must see null, never a fake 0 (docs/24 F19-4).
+function Get-WaScrollNumbers($el) {
+    $sp = Get-WaPattern $el 'Scroll'
+    if (-not $sp) { return $null }
+    $c = $sp.Current
+    $px = $c.HorizontalScrollPercent
+    $py = $c.VerticalScrollPercent
+    $vw = $c.HorizontalViewSize
+    $vh = $c.VerticalViewSize
+    return [ordered]@{
+        horizontallyScrollable = [bool]$c.HorizontallyScrollable
+        verticallyScrollable   = [bool]$c.VerticallyScrollable
+        percentX               = $(if ($px -lt 0) { $null } else { [Math]::Round($px, 2) })
+        percentY               = $(if ($py -lt 0) { $null } else { [Math]::Round($py, 2) })
+        viewWidth              = $(if ($vw -lt 0) { $null } else { [Math]::Round($vw, 2) })
+        viewHeight             = $(if ($vh -lt 0) { $null } else { [Math]::Round($vh, 2) })
+    }
+}
+
+# T28: walk from an element up through its control-view ancestors and report
+#   pattern -> nearest ancestor (or self) with a usable ScrollPattern  (positive evidence)
+#   clip    -> nearest ancestor that actually clips the element's rect (weaker, via:'rect')
+#   chain   -> every step, so a caller can see why the answer is what it is
+function Get-WaScrollInfo($el, [int]$maxDepth) {
+    $chain = New-Object System.Collections.ArrayList
+    $patternC = $null
+    $clipC = $null
+    $selfRect = $null
+    $p = $el
+    $d = 0
+    while ($p -and $d -le $maxDepth) {
+        $v = Get-NodeView $p $d
+        if (-not $v) { break }
+        if ($d -eq 0) { $selfRect = $v.rect }
+        $num = Get-WaScrollNumbers $p
+        $scrollable = [bool]($num -and ($num.verticallyScrollable -or $num.horizontallyScrollable))
+        [void]$chain.Add([ordered]@{
+            name       = $v.name
+            type       = $v.type
+            aid        = $v.aid
+            class      = $v.class
+            rect       = $v.rect
+            depth      = $v.depth
+            offscreen  = $v.offscreen
+            patterns   = $v.patterns
+            scrollable = $scrollable
+            scroll     = $num
+        })
+        if ($scrollable -and -not $patternC) { $patternC = [ordered]@{ view = $v; scroll = $num } }
+        if ($d -gt 0 -and -not $clipC -and $selfRect -and $v.rect.w -gt 0 -and $v.rect.h -gt 0 -and $v.type -ne 'ControlType.Window') {
+            $selfTop = $selfRect.y
+            $selfBottom = $selfRect.y + $selfRect.h
+            $boxTop = $v.rect.y + 2
+            $boxBottom = $v.rect.y + $v.rect.h - 2
+            if ($selfTop -lt $boxTop -or $selfBottom -gt $boxBottom) { $clipC = [ordered]@{ view = $v } }
+        }
+        $next = $null
+        try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
+        if (-not $next) {
+            try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
+        }
+        if (-not $next -or $next -eq $p) { break }
+        $p = $next
+        $d = $d + 1
+    }
+    if (-not $patternC -and -not $clipC) {
+        $clipC = Get-WaClipAncestor $el (Get-Rect $el)
+    }
+    return [ordered]@{ chain = @($chain); pattern = $patternC; clip = $clipC }
+}
+
+# T28: nearest control-view ancestor that does NOT contain the element's rect. WPF decorators
+# (Border, Canvas) have no automation peer, so neither the control nor the raw view can show every
+# clipping ancestor; this is the honest geometric fallback (F19-4, via:'rect').
+function Get-WaClipAncestor($el, $selfRect) {
+    $p = $el
+    $d = 0
+    while ($p -and $d -le 10) {
+        $next = $null
+        try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
+        if (-not $next) {
+            try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
+        }
+        if (-not $next -or $next -eq $p) { break }
+        $p = $next
+        $d = $d + 1
+        $v = Get-NodeView $p $d
+        if (-not $v) { continue }
+        if ($v.type -eq 'ControlType.Window') { break }
+        if ($v.rect.w -le 0 -or $v.rect.h -le 0) { continue }
+        if (($selfRect.y -lt ($v.rect.y + 2)) -or (($selfRect.y + $selfRect.h) -gt ($v.rect.y + $v.rect.h - 2))) {
+            return [ordered]@{ view = $v }
+        }
+    }
+    return $null
+}
+
+# T28: the deepest warm-tree element whose rect contains the point - the element-level twin of
+# Get-WaRectHit, used when FromPoint hands back a container (Chromium) or nothing (off-screen).
+# T28: point probes are scoped to the target window. FromPoint is global, so a point over another
+# app (a maximised overlay, the desktop) must read as ENV_NO_HIT, not as that app's element.
+function Get-WaOwnerHwnd($el) {
+    $p = $el
+    $d = 0
+    while ($p -and $d -le 40) {
+        $t = ''
+        try { $t = $p.Current.ControlType.ProgrammaticName } catch { $t = '' }
+        if ($t -eq 'ControlType.Window') {
+            try { return [int]$p.Current.NativeWindowHandle } catch { return 0 }
+        }
+        $next = $null
+        try { $next = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($p) } catch { $next = $null }
+        if (-not $next -or $next -eq $p) {
+            try { $next = [System.Windows.Automation.TreeWalker]::RawViewWalker.GetParent($p) } catch { $next = $null }
+        }
+        if (-not $next -or $next -eq $p) { return 0 }
+        $p = $next
+        $d = $d + 1
+    }
+    return 0
+}
+
+function Get-WaElementAtPoint([int]$x, [int]$y) {
+    $best = $null; $bestArea = 0; $bestDepth = -1
+    foreach ($c in $script:cols) {
+        $v = $c.view
+        if (-not $v) { continue }
+        $r = $v.rect
+        if ($r.w -le 0 -or $r.h -le 0) { continue }
+        if ($x -lt $r.x -or $x -ge ($r.x + $r.w) -or $y -lt $r.y -or $y -ge ($r.y + $r.h)) { continue }
+        $area = $r.w * $r.h
+        if ($null -eq $best -or $area -lt $bestArea -or ($area -eq $bestArea -and $v.depth -gt $bestDepth)) {
+            $best = $c; $bestArea = $area; $bestDepth = $v.depth
+        }
+    }
+    if (-not $best) { return $null }
+    return $best.el
 }
 
 function Write-Fail2([string]$code, [string]$msg, $extra, [int]$exitCode) {
@@ -419,7 +562,7 @@ try {
     # T21: a point probe with a target window also uses the find-grade tree, because the rect-hit fallback
     # needs names/rects deeper than the 3-level tree dump.
     $pointModeWanted = ($PointX -ge 0 -and $PointY -ge 0) -and ($Hwnd -or $Title)
-    $findMode = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly -or $Action -or $FindText -or $pointModeWanted)
+    $findMode = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly -or $Action -or $FindText -or $ScrollInfo -or $pointModeWanted)
     if ($Depth -ge 0) { $depthGiven = $true; $baseDepth = $Depth } else { $depthGiven = $false; $baseDepth = if ($findMode) { 20 } else { 3 } }
     $script:nodeCap = if ($MaxNodes -ge 1) { $MaxNodes } elseif ($findMode) { 4000 } else { 400 }
 
@@ -492,6 +635,96 @@ try {
         break
     }
     $warmMs = [int]((Get-Date) - $warmStart).TotalMilliseconds
+
+    # ---- T28: which element owns the scroll here (docs/24 F19) ----
+    #
+    # v1.3 could find an option but never prove it was reachable: on bilibili.com 16 blind
+    # "wheel + screenshot" loops all returned ok while the panel never moved, because the wheel was
+    # aimed at a point that was not over the scroll container. This mode answers the missing half:
+    # which element scrolls, and what is its current scroll state. ScrollPattern is positive evidence;
+    # a clipping ancestor is the honest weaker answer (via:'rect', no percentages).
+    if ($ScrollInfo) {
+        $ctx = [ordered]@{ scanned = $script:cols.Count; passes = $passes; warmMs = $warmMs; warmRetries = $warmRetries; depthUsed = $depthUsed }
+        $ptGiven = ($PointX -ge 0 -and $PointY -ge 0)
+        $haveFind = [bool]($FindName -or $FindType -or $FindAid -or $FindClass -or $EnabledOnly -or $OnScreenOnly)
+        if (-not $ptGiven -and -not $haveFind) {
+            Write-Fail2 'ARG_NEED_FIND' '--scroll-info needs --point X,Y or a find condition' $null 2
+        }
+        $el = $null
+        if ($ptGiven) {
+            # the point must land on the target window at all: a global FromPoint over another app is
+            # not "no element", it is "not this window" - F19-3 wants ENV_NO_HIT either way.
+            $winEl = $null
+            try { $winEl = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$Hwnd) } catch { $winEl = $null }
+            if ($winEl) {
+                $wr = Get-Rect $winEl
+                if ($PointX -lt ($wr.x - 2) -or $PointX -ge ($wr.x + $wr.w + 2) -or $PointY -lt ($wr.y - 2) -or $PointY -ge ($wr.y + $wr.h + 2)) {
+                    $o = [ordered]@{ ok = $false; code = 'ENV_NO_HIT'; msg = "point $PointX,$PointY is outside window $('0x{0:x}' -f $Hwnd)"; mode = 'scrollinfo'; point = [ordered]@{ x = $PointX; y = $PointY }; window = $wr }
+                    Out-WaJson (Merge-Ctx $o $ctx)
+                    exit 3
+                }
+            }
+            $pt = New-Object System.Windows.Point($PointX, $PointY)
+            try { $el = [System.Windows.Automation.AutomationElement]::FromPoint($pt) } catch { $el = $null }
+            if (-not $el) { $el = Get-WaElementAtPoint $PointX $PointY }
+            if ($el) {
+                $owner = Get-WaOwnerHwnd $el
+                if ($owner -ne 0 -and $owner -ne [int]$Hwnd) { $el = Get-WaElementAtPoint $PointX $PointY }
+            }
+            if (-not $el) {
+                $o = [ordered]@{ ok = $false; code = 'ENV_NO_HIT'; msg = "no element under point $PointX,$PointY"; mode = 'scrollinfo'; point = [ordered]@{ x = $PointX; y = $PointY } }
+                Out-WaJson (Merge-Ctx $o $ctx)
+                exit 3
+            }
+        } else {
+            $i = 0
+            foreach ($c in $script:cols) {
+                if (Test-WaMatch $c.view) {
+                    if ($i -eq $Index) { $el = $c.el; break }
+                    $i = $i + 1
+                }
+            }
+            if (-not $el) {
+                $o = [ordered]@{ ok = $false; code = 'ENV_NO_MATCH'; msg = 'no element matches the find conditions'; mode = 'scrollinfo'; total = 0 }
+                Out-WaJson (Merge-Ctx $o $ctx)
+                exit 3
+            }
+        }
+        $info = Get-WaScrollInfo $el 10
+        if ($ptGiven -and -not $info.pattern -and -not $info.clip) {
+            # Chromium answers page points with a container, so a point probe can start at the wrong
+            # element: retry once from the deepest warm-tree element that contains the point.
+            $alt = Get-WaElementAtPoint $PointX $PointY
+            if ($alt) { $info = Get-WaScrollInfo $alt 10; $el = $alt }
+        }
+        $container = $null
+        $via = 'none'
+        $scrollable = $false
+        if ($info.pattern) {
+            $cv = $info.pattern.view
+            $container = [ordered]@{ name = $cv.name; type = $cv.type; aid = $cv.aid; class = $cv.class; rect = $cv.rect; depth = $cv.depth; patterns = $cv.patterns; scroll = $info.pattern.scroll }
+            $via = 'scroll-pattern'
+            $scrollable = $true
+        } elseif ($info.clip) {
+            $cv = $info.clip.view
+            $container = [ordered]@{ name = $cv.name; type = $cv.type; aid = $cv.aid; class = $cv.class; rect = $cv.rect; depth = $cv.depth; patterns = $cv.patterns; scroll = $null }
+            $via = 'rect'
+        }
+        $o = [ordered]@{
+            ok         = $true
+            mode       = 'scrollinfo'
+            hwnd       = ('0x{0:x}' -f $Hwnd)
+            point      = $(if ($ptGiven) { [ordered]@{ x = $PointX; y = $PointY } } else { $null })
+            element    = (Get-NodeView $el 0)
+            via        = $via
+            scrollable = $scrollable
+            container  = $container
+            chain      = $info.chain
+        }
+        Out-WaJson (Merge-Ctx $o $ctx)
+        exit 0
+    }
+
 
     # ---- T21: point with a target window - FromPoint first, warm-tree rect-hit as the honest answer ----
     #
