@@ -10,6 +10,8 @@ param(
     [int]$Width = -1,
     [int]$Height = -1,
     [string]$Topmost = '',
+    [long]$OwnedBy = 0,
+    [switch]$IncludeEmpty,
     [switch]$DryRun
 )
 $env:WA_VERSION = $Version
@@ -204,12 +206,18 @@ try {
         Write-WaFail 'ARG_BAD_ACTION' "unsupported action: $Action (list|info|focus|close|state|set)"
         exit 2
     }
-    $wins = Get-WaTopWindows
+    $wins = Get-WaTopWindows -IncludeEmpty:$IncludeEmpty
+    if ($OwnedBy -ne 0) {
+        $want = ('0x{0:x}' -f $OwnedBy)
+        $wins = @($wins | Where-Object { $_.owner -eq $want })
+    }
     Out-WaJson ([ordered]@{
-        ok      = $true
-        action  = 'list'
-        count   = $wins.Count
-        windows = $wins
+        ok        = $true
+        action    = 'list'
+        includeEmpty = [bool]$IncludeEmpty
+        ownedBy   = $(if ($OwnedBy -ne 0) { ('0x{0:x}' -f $OwnedBy) } else { $null })
+        count     = $wins.Count
+        windows   = $wins
         at      = (Get-Date).ToUniversalTime().ToString('o')
     })
     exit 0

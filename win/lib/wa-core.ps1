@@ -27,6 +27,7 @@ if (-not ('Wa.Native' -as [type])) {
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextW(IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetClassNameW(IntPtr h, System.Text.StringBuilder s, int n);
 [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);
 [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);
 [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);
 [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
@@ -154,6 +155,9 @@ function Get-WaWindowInfo([IntPtr]$h) {
         class     = $cb.ToString()
         pid       = $pid_
         process   = $pname
+        # T30: a popup (WPF ComboBox dropdown, Chromium <select>) is a top-level window OWNED by
+        # its opener and usually has an empty title, so "list windows" alone cannot show it.
+        owner     = ('0x{0:x}' -f ([Wa.Native]::GetWindow($h, 4)).ToInt64())
         visible   = [Wa.Native]::IsWindowVisible($h)
         minimized = [Wa.Native]::IsIconic($h)
         rect      = [ordered]@{ x = $r.Left; y = $r.Top; w = ($r.Right - $r.Left); h = ($r.Bottom - $r.Top) }
@@ -263,7 +267,7 @@ function Get-WaWorkArea {
     [ordered]@{ x = $a.Left; y = $a.Top; w = ($a.Right - $a.Left); h = ($a.Bottom - $a.Top) }
 }
 
-function Get-WaTopWindows {
+function Get-WaTopWindows([switch]$IncludeEmpty) {
     $found = New-Object System.Collections.ArrayList
     $cb = [Wa.Native+EnumProc]{
         param($h, $p)
@@ -278,7 +282,9 @@ function Get-WaTopWindows {
         if (-not [Wa.Native]::IsWindowVisible($h)) { continue }
         [void]$tb.Clear()
         $n = [Wa.Native]::GetWindowTextW($h, $tb, 512)
-        if ($n -le 0) { continue }
+        # T30: -IncludeEmpty keeps visible owned windows that have no title - that is exactly how a
+        # dropdown popup looks. Unowned empty windows stay filtered (IME/helper noise).
+        if ($n -le 0 -and -not ($IncludeEmpty -and ([Wa.Native]::GetWindow($h, 4)) -ne [IntPtr]::Zero)) { continue }
         [void]$out.Add((Get-WaWindowInfo $h))
     }
     $out.ToArray()

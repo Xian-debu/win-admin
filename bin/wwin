@@ -10,7 +10,7 @@ set -uo pipefail
 usage() {
   cat <<'EOF'
 usage:
-  wwin list
+  wwin list [--owned-by 0x1234] [--include-empty]
   wwin info  --hwnd 0x1234
   wwin focus --hwnd 0x1234 [--yes]   (--yes is accepted and ignored: focus never injects)
   wwin close --hwnd 0x1234
@@ -28,6 +28,10 @@ set flags:
   --w/--h          resize (width/height in physical px)
   --topmost on|off z-order pin
 
+list flags (T30): --owned-by keeps only windows OWNED by that handle (a popup / dropdown dialog);
+--include-empty also lists visible owned windows without a title - that is how a ComboBox/select
+popup looks, so 'list' alone can never see it. Each window entry carries owner (0x...).
+
 Every set prints before/after and FAILS (ENV_STATE_UNCHANGED, exit 3) when the window did not
 actually end up in the requested state - a silent no-op is an error here, not a success.
 
@@ -40,7 +44,18 @@ case "$sub" in
   -h|--help|help) usage; exit 0 ;;
   list)
     shift || true
-    raw="$(wa_run wwin -Action list)"
+    OB=""; IE=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --owned-by) OB="$2"; shift 2 ;;
+        --include-empty) IE="-IncludeEmpty"; shift ;;
+        *) echo "unknown arg: $1" >&2; exit 2 ;;
+      esac
+    done
+    LARGS=(-Action list)
+    [ -n "$IE" ] && LARGS+=(-IncludeEmpty)
+    [ -n "$OB" ] && LARGS+=(-OwnedBy "$((OB))")
+    raw="$(wa_run wwin "${LARGS[@]}")"
     wa_finish "$raw" ;;
   info|focus|close|state)
     shift || true

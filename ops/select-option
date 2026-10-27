@@ -1,0 +1,248 @@
+#!/usr/bin/env bash
+# ops/select-option - open a trigger's option list and pick one option, then prove it took effect.
+#
+# Why this exists (docs/24 F21): a "select" is not one click. The trigger click only expands a list;
+# the option may live in the page (panel) or in a separate owned top-level window (native popup, e.g.
+# a WPF ComboBox dropdown / a Chromium <select>), may be outside the scroll container (must be
+# revealed first), and the result is only real when the value witness reads back changed.
+# v1.3 clicked guessed coordinates and called a no-op a success; this tool refuses that.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-select-option "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/select-option (--hwnd H | --title REGEX) (--trigger RE | --trigger-aid RE)
+                         --option RE [--expect-value TEXT] [--value-aid RE]
+                         [--mode auto|panel|native] [--timeout MS] [--yes] [--dry-run]
+  --trigger / --trigger-aid   the control to click to open the list (name / automation id)
+  --option RE                 the option to pick (name regex, full match against the item name)
+  --expect-value TEXT         the string the value witness must read AFTER the pick
+  --value-aid RE              read the witness from this element's name instead of window title
+  --mode auto                 panel: in-page expanded list; native: separate owned top-level window
+  --timeout MS                how long to wait for the list to appear (default 4000)
+  --yes                       actually inject. Default is dry-run: plan only, no events.
+  output: {ok,mode:"panel"|"native",clicked:{name,rect},value:{before,after},matches,closed,
+           steps,revealed,popup:{hwnd,title,class}(native only)}
+  steps counts reveal scroll actions (0 = the option was already reachable); a pick that needed
+  scrolling to item 28 reports steps>=1, and a pick that did not change the witness fails.
+  exit 0 ok / dry-run | 2 arg | 3 env (ENV_NO_TRIGGER, ENV_NO_OPTION, ENV_NO_EFFECT, injection
+       codes from winput) | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; TRIG=""; TRIGAID=""; OPT=""; VAID=""; EXPECT=""; MODE=auto; TMO=4000; REAL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --trigger) TRIG="$2"; shift 2 ;;
+    --trigger-aid) TRIGAID="$2"; shift 2 ;;
+    --option) OPT="$2"; shift 2 ;;
+    --value-aid) VAID="$2"; shift 2 ;;
+    --expect-value) EXPECT="$2"; shift 2 ;;
+    --mode) MODE="$2"; shift 2 ;;
+    --timeout) TMO="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+case "$MODE" in auto|panel|native) ;; *) echo 'mode must be auto|panel|native' >&2; exit 2 ;; esac
+case "$TMO" in ''|*[!0-9]*) echo 'timeout must be a number of milliseconds' >&2; exit 2 ;; esac
+{ [ "$TMO" -ge 300 ] && [ "$TMO" -le 20000 ]; } || { echo 'timeout must be 300..20000 ms' >&2; exit 2; }
+[ -n "$OPT" ] || { echo '--option is required (the option name is the whole point)' >&2; exit 2; }
+[ -n "$TRIG$TRIGAID" ] || { echo '--trigger or --trigger-aid is required' >&2; exit 2; }
+
+H="$(op_resolve_hwnd "$HWND" "$TITLE")"; RC=$?
+[ "$RC" -eq 0 ] || { printf '%s\n' "$H"; exit "$RC"; }
+H="$((H))"
+
+hex_of() { printf '0x%x' "$(( $1 ))"; }
+title_of() { bash "$REPO_DIR/bin/wwin" info --hwnd "$1" 2>/dev/null | jq -r '.window.title // ""' 2>/dev/null; }
+winrect_of() { bash "$REPO_DIR/bin/wwin" info --hwnd "$1" 2>/dev/null | jq -c '.window.rect // empty' 2>/dev/null; }
+wread() {  # witness value: an element name or the window title
+  if [ -n "$VAID" ]; then
+    bash "$REPO_DIR/bin/wuia" --hwnd "$1" --find-aid "^$VAID$" 2>/dev/null | jq -r '.nodes[0].name // ""' 2>/dev/null
+  else
+    title_of "$1"
+  fi
+}
+find_first() {  # $1 hwnd, $2 regex -> first rendered node as compact json (empty when none)
+  bash "$REPO_DIR/bin/wuia" --hwnd "$1" --find-name "$2" 2>/dev/null \
+    | jq -c '.nodes[]? | select((.rect.w // 0) > 2 and (.rect.h // 0) > 2 and (.offscreen != true))' 2>/dev/null | head -1
+  # NOTE offscreen matters: a COLLAPSED WPF panel still reports laid-out child rects, so a filter on
+  # rect alone matched the option before the trigger had expanded anything and clicked dead space.
+}
+owned_popups() {  # visible windows owned by the target - the only way a popup shows up at all
+  bash "$REPO_DIR/bin/wwin" list --owned-by "$1" --include-empty 2>/dev/null \
+    | jq -c '.windows[]? | select(.hwnd != ("" )) ' 2>/dev/null
+}
+
+TFIND=()
+if [ -n "$TRIGAID" ]; then TFIND+=(--find-aid "^$TRIGAID$"); else TFIND+=(--find-name "^$TRIG$"); fi
+TJ="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" "${TFIND[@]}" 2>/dev/null)"; TRC=$?
+TNODE="$(printf '%s' "$TJ" | jq -c '.nodes[0] // empty' 2>/dev/null)"
+if [ "$TRC" -ne 0 ] || [ -z "$TNODE" ]; then
+  WA_AUDIT_RESULT=ENV_NO_TRIGGER
+  printf '{"ok":false,"tool":"ops/select-option","code":"ENV_NO_TRIGGER","message":"the trigger was not found, so the click would go blind","steps":0}\n'
+  exit 3
+fi
+TRECT="$(printf '%s' "$TNODE" | jq -c '.rect')"
+TX=$(( $(printf '%s' "$TRECT" | jq -r '.x') + $(printf '%s' "$TRECT" | jq -r '.w') / 2 ))
+TY=$(( $(printf '%s' "$TRECT" | jq -r '.y') + $(printf '%s' "$TRECT" | jq -r '.h') / 2 ))
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT=dryrun
+  jq -nc --argjson trig "$TNODE" --arg opt "$OPT" --arg mode "$MODE" --argjson pt "{\"x\":$TX,\"y\":$TY}" \
+    '{ok:true,dry_run:true,plan:["focus","click-trigger","discover","reveal-if-needed","click-option","verify-witness"],mode:$mode,trigger:{name:$trig.name,rect:$trig.rect},triggerPoint:$pt,option:$opt,steps:0}'
+  exit 0
+fi
+
+op_pause_gate input
+op_focus "$H" >/dev/null || { FC="$OP_FOCUS_CODE"; [ -n "$FC" ] || FC=ENV_NOT_FOREGROUND; WA_AUDIT_RESULT="$FC"; printf '{"ok":false,"tool":"ops/select-option","code":"%s","message":"%s","steps":0}\n' "$FC" "$OP_FOCUS_MSG"; exit 3; }
+
+BEFORE="$(wread "$H")"
+CO="$(bash "$REPO_DIR/bin/winput" click "$TX" "$TY" --expect-hwnd "$H" --yes 2>&1)"; CRC=$?
+if [ "$CRC" -ne 0 ]; then
+  CCODE="$(printf '%s' "$CO" | jq -r '.code // empty' 2>/dev/null)"; [ -n "$CCODE" ] || CCODE=EXEC_CLICK_FAILED
+  WA_AUDIT_RESULT="$CCODE"
+  printf '%s' "$CO" | jq -c --argjson trig "$TNODE" '. + {tool:"ops/select-option",trigger:{name:$trig.name,rect:$trig.rect}}' 2>/dev/null || printf '{"ok":false,"code":"%s","message":"trigger click failed"}\n' "$CCODE"
+  exit "$CRC"
+fi
+
+# ---- discovery: panel lives inside H; native lives in a separate window OWNED by H
+HEX="$(hex_of "$H")"
+NODE=""; FOUND_MODE=""; FOUND_HWND=""; PTITLE=""; PCLASS=""
+T0=$(date +%s%3N)
+while :; do
+  if [ -z "$FOUND_MODE" ] && [ "$MODE" != panel ]; then
+    for W in $(owned_popups "$H" | jq -r --arg h "$HEX" 'select(.hwnd != $h) | .hwnd' 2>/dev/null); do
+      N="$(find_first "$W" "^$OPT$")"
+      if [ -n "$N" ]; then
+        NODE="$N"; FOUND_MODE=native; FOUND_HWND="$W"; PTITLE="$(title_of "$W")"
+        PCLASS="$(bash "$REPO_DIR/bin/wwin" info --hwnd "$W" 2>/dev/null | jq -r '.window.class // ""')"
+        break
+      fi
+    done
+  fi
+  if [ -z "$FOUND_MODE" ] && [ "$MODE" != native ]; then
+    N="$(find_first "$H" "^$OPT$")"
+    if [ -n "$N" ]; then NODE="$N"; FOUND_MODE=panel; FOUND_HWND="$H"; fi
+  fi
+  [ -n "$FOUND_MODE" ] && break
+  { [ $(( $(date +%s%3N) - T0 )) -ge "$TMO" ]; } && break
+  sleep 0.15
+done
+
+if [ -z "$FOUND_MODE" ]; then
+  # close whatever may have opened, then report honestly whether it is gone
+  bash "$REPO_DIR/bin/winput" key esc --expect-hwnd "$H" --yes >/dev/null 2>&1
+  sleep 0.2
+  CLOSED=true
+  if [ "$MODE" != native ]; then
+    LEFTO="$(find_first "$H" "^$OPT$")"
+    [ -z "$LEFTO" ] || CLOSED=false
+  fi
+  if [ "$MODE" != panel ]; then
+    LEFTP="$(owned_popups "$H" | jq -r --arg h "$HEX" 'select(.hwnd != $h) | .hwnd' 2>/dev/null)"
+    [ -z "$LEFTP" ] || CLOSED=false
+  fi
+  WA_AUDIT_RESULT=ENV_NO_OPTION
+  jq -nc --arg opt "$OPT" --argjson closed "$CLOSED" --argjson tmo "$TMO" --arg mode "$MODE" \
+    '{ok:false,tool:"ops/select-option",code:"ENV_NO_OPTION",message:("no visible option matched " + $opt + " within " + ($tmo|tostring) + " ms"),option:$opt,mode:$mode,tried:["panel","native"],steps:0,closed:$closed}'
+  exit 3
+fi
+
+ERECT="$(printf '%s' "$NODE" | jq -c '.rect')"
+ELX=$(( $(printf '%s' "$ERECT" | jq -r '.x') + $(printf '%s' "$ERECT" | jq -r '.w') / 2 ))
+ELY=$(( $(printf '%s' "$ERECT" | jq -r '.y') + $(printf '%s' "$ERECT" | jq -r '.h') / 2 ))
+PX="$ELX"; PY="$ELY"; STEPS=0; REVEALED=false; VIA=""
+
+# the scroll container that holds the option (null when it is not inside one, e.g. a popup):
+# evidence for "was it reachable where it claimed to be", reported on success.
+SI="$(bash "$REPO_DIR/bin/wuia" --hwnd "$FOUND_HWND" --scroll-info --find-name "^$OPT$" 2>/dev/null)"
+CONTAINER="$(printf '%s' "$SI" | jq -c '.container // empty' 2>/dev/null)"
+if [ -n "$CONTAINER" ]; then CONTAINER_JSON="$CONTAINER"; else CONTAINER_JSON=null; fi
+
+# ---- is the option actually reachable where it claims to be? A rendered-but-off-screen node
+# (live pages report y=2084 inside a 282px container) must be revealed before it is clicked.
+WRECT="$(winrect_of "$FOUND_HWND")"
+if [ -n "$WRECT" ]; then
+  WX="$(printf '%s' "$WRECT" | jq -r '.x')"; WY="$(printf '%s' "$WRECT" | jq -r '.y')"
+  WW="$(printf '%s' "$WRECT" | jq -r '.w')"; WH="$(printf '%s' "$WRECT" | jq -r '.h')"
+  OUTSIDE=false
+  { [ "$PX" -lt "$WX" ] || [ "$PX" -ge $((WX + WW)) ] || [ "$PY" -lt "$WY" ] || [ "$PY" -ge $((WY + WH)) ]; } && OUTSIDE=true
+  SI="$(bash "$REPO_DIR/bin/wuia" --hwnd "$FOUND_HWND" --scroll-info --find-name "^$OPT$" 2>/dev/null)"
+  CONTAINER="$(printf '%s' "$SI" | jq -c '.container // empty' 2>/dev/null)"
+  if [ -n "$CONTAINER" ] && [ "$(printf '%s' "$CONTAINER" | jq -r '.rect.w // 0')" -gt 2 ]; then
+    INSIDE="$(printf '%s' "$SI" | jq -r --argjson pad 2 '. as $s | ($s.element.rect and $s.container.rect and ($s.element.rect.x >= ($s.container.rect.x - $pad)) and ($s.element.rect.y >= ($s.container.rect.y - $pad)) and (($s.element.rect.x + $s.element.rect.w) <= ($s.container.rect.x + $s.container.rect.w + $pad)) and (($s.element.rect.y + $s.element.rect.h) <= ($s.container.rect.y + $s.container.rect.h + $pad))) // false' 2>/dev/null)"
+    [ "$INSIDE" = true ] || OUTSIDE=true
+  fi
+  if [ "$OUTSIDE" = true ]; then
+    RJ="$(bash "$REPO_DIR/ops/reveal" --hwnd "$FOUND_HWND" --find-name "^$OPT$" --yes)"; RRC=$?
+    if [ "$RRC" -ne 0 ]; then
+      RCODE="$(printf '%s' "$RJ" | jq -r '.code // "ENV_NOT_REVEALED"' 2>/dev/null)"
+      WA_AUDIT_RESULT="$RCODE"
+      printf '%s' "$RJ" | jq -c --arg mode "$FOUND_MODE" '. + {tool:"ops/select-option",mode:$mode}' 2>/dev/null || true
+      exit "$RRC"
+    fi
+    PX="$(printf '%s' "$RJ" | jq -r '.point.x')"; PY="$(printf '%s' "$RJ" | jq -r '.point.y')"
+    STEPS="$(printf '%s' "$RJ" | jq -r '.steps // 0')"; REVEALED=true
+    VIA="$(printf '%s' "$RJ" | jq -r '.via // ""')"
+    # the pre-reveal rect is stale (y=2084 for an option the reveal then scrolled to y=286);
+    # report where the element actually sat when it was clicked.
+    RNODE="$(printf '%s' "$RJ" | jq -c '.element // empty' 2>/dev/null)"
+    [ -n "$RNODE" ] && NODE="$RNODE"
+  fi
+fi
+
+CJ="$(bash "$REPO_DIR/bin/winput" click "$PX" "$PY" --expect-hwnd "$FOUND_HWND" --yes --allow-related 2>&1)"; C2RC=$?
+if [ "$C2RC" -ne 0 ]; then
+  CCODE="$(printf '%s' "$CJ" | jq -r '.code // empty' 2>/dev/null)"; [ -n "$CCODE" ] || CCODE=EXEC_CLICK_FAILED
+  WA_AUDIT_RESULT="$CCODE"
+  printf '%s' "$CJ" | jq -c --argjson trig "$TNODE" --arg mode "$FOUND_MODE" '{tool:"ops/select-option",mode:$mode,trigger:{name:$trig.name,rect:$trig.rect},steps:0} + .' 2>/dev/null || printf '{"ok":false,"code":"%s","message":"option click failed"}\n' "$CCODE"
+  exit "$C2RC"
+fi
+
+# ---- closed: the list must be gone, otherwise the pick may have only hovered
+CLOSED=false
+T1=$(date +%s%3N)
+while :; do
+  if [ "$FOUND_MODE" = native ]; then
+    # jq on an EMPTY window list produces no output at all, not 0 - that made the loop here always
+    # time out and report closed:false even when the popup was long gone. Count inside one document.
+    LEFT="$(bash "$REPO_DIR/bin/wwin" list --owned-by "$H" --include-empty 2>/dev/null | jq -r --arg w "$FOUND_HWND" '[(.windows // [])[] | select(.hwnd == $w)] | length' 2>/dev/null)"
+    { [ "$LEFT" = 0 ]; } && { CLOSED=true; break; }
+  else
+    LEFT_OPEN="$(find_first "$H" "^$OPT$")"
+    { [ -z "$LEFT_OPEN" ]; } && { CLOSED=true; break; }
+  fi
+  { [ $(( $(date +%s%3N) - T1 )) -ge 1500 ]; } && break
+  sleep 0.1
+done
+
+AFTER="$(wread "$H")"
+MATCHES=null
+if [ -n "$EXPECT" ]; then
+  if [ "$AFTER" = "$EXPECT" ]; then MATCHES=true; else MATCHES=false; fi
+fi
+
+if [ "$MATCHES" = false ]; then
+  WA_AUDIT_RESULT=ENV_NO_EFFECT
+  jq -nc --argjson node "$NODE" --arg mode "$FOUND_MODE" --arg before "$BEFORE" --arg after "$AFTER" --arg expect "$EXPECT" --argjson closed "$CLOSED" --argjson steps "$STEPS" \
+    '{ok:false,tool:"ops/select-option",code:"ENV_NO_EFFECT",message:("the pick reported success but the witness still reads " + $after),mode:$mode,clicked:{name:$node.name,rect:$node.rect},value:{before:$before,after:$after,expected:$expect},matches:false,closed:$closed,steps:$steps}'
+  exit 3
+fi
+
+if [ "$FOUND_MODE" = native ]; then
+  jq -nc --argjson node "$NODE" --arg before "$BEFORE" --arg after "$AFTER" --argjson matches "$MATCHES" --argjson closed "$CLOSED" --argjson steps "$STEPS" --argjson revealed "$REVEALED" --arg via "$VIA" --arg hwnd "$FOUND_HWND" --arg title "$PTITLE" --arg cls "$PCLASS" --argjson container "$CONTAINER_JSON" --argjson pt "{\"x\":$PX,\"y\":$PY}" \
+    '{ok:true,tool:"ops/select-option",mode:"native",clicked:{name:$node.name,rect:$node.rect},point:$pt,value:{before:$before,after:$after},matches:$matches,closed:$closed,steps:$steps,revealed:$revealed,via:$via,container:$container,popup:{hwnd:$hwnd,title:$title,class:$cls}}'
+else
+  jq -nc --argjson node "$NODE" --arg before "$BEFORE" --arg after "$AFTER" --argjson matches "$MATCHES" --argjson closed "$CLOSED" --argjson steps "$STEPS" --argjson revealed "$REVEALED" --arg via "$VIA" --argjson container "$CONTAINER_JSON" --argjson pt "{\"x\":$PX,\"y\":$PY}" \
+    '{ok:true,tool:"ops/select-option",mode:"panel",clicked:{name:$node.name,rect:$node.rect},point:$pt,value:{before:$before,after:$after},matches:$matches,closed:$closed,steps:$steps,revealed:$revealed,via:$via,container:$container}'
+fi
+exit 0
