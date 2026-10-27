@@ -11,7 +11,10 @@ mkdir -p "$APP_ROOT/tmp"
 WIN="${WINADMIN_APP_ROOT:-/mnt/c/Users/Public/win-admin}"
 cp "$(dirname "$0")/testwin.ps1" "$WIN/tmp/wa-testwin.ps1"
 rm -f "$WIN/tmp/testwin.json" "$WIN/tmp/testwin.err" "$WIN/tmp/testwin.out" "$WIN/tmp/testwin-error.txt"
-winps -t 30 "Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-testwin.ps1")','-Title','$TITLE' -RedirectStandardError '$(wa_winpath "$WIN/tmp/testwin.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/testwin.out")' -PassThru | Select-Object -ExpandProperty Id" | tail -1 > "$STATE_DIR/testwin.pid" 2>/dev/null
+# K73: fire and forget. winps cannot see EOF while the started process holds its
+# stdout pipe, so waiting for it costs the full winps timeout (observed 30s per
+# fixture start). The pid that owns the window is read from the fixture JSON below.
+( winps -t 25 "Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-testwin.ps1")','-Title','$TITLE' -RedirectStandardError '$(wa_winpath "$WIN/tmp/testwin.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/testwin.out")' -PassThru | Select-Object -ExpandProperty Id" >/dev/null 2>&1 & )
 for i in $(seq 1 80); do
   [ -s "$WIN/tmp/testwin.json" ] && jq -e . "$WIN/tmp/testwin.json" >/dev/null 2>&1 && break
   sleep 0.25

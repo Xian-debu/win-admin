@@ -177,3 +177,16 @@ bash scripts/ps-doctor.sh --reap   # 杀掉带 -NoExit / 无主（无 30 分钟�
 判据：`leaked` 必须为 0。`leaks[]` 里 `noExit:true` 是探针违规，`fixture:true` 但 pid 不在 `$STATE_DIR/*.pid` 里是夹具清扫漏掉了。`powershell` 计数含当次巡检自身的瞬时子进程，别拿它当「有几个夹具」的指标。
 
 新增夹具时把 9.1 的启动段和 9.2 的 `P()` 一起复制过去，然后跑一次 `ps-doctor.sh` 确认 `leaked:0`。
+
+### 9.4 起「长寿命进程」时不要等 winps 的输出流
+
+启动一个会一直活着的 Windows 进程（夹具宿主、真实应用）时，**不要**写成 `winps -t 30 "Start-Process ... -PassThru | Select-Object -ExpandProperty Id"` 然后指望它立刻返回：pid 会立刻打印，但子进程继承了 winps 的 stdout 管道句柄，管道永不 EOF，`winps` 只能耗满超时（实测每次 30.7s，rc=124）。
+
+正确形状是火忘式发射 + 从产物里取 pid：
+
+```bash
+( winps -t 25 "Start-Process ... -PassThru | Select-Object -ExpandProperty Id" >/dev/null 2>&1 & )
+# pid 以夹具自己写出的 JSON 为准（K61），不要依赖 winps 的 StandardOutput
+```
+
+这也是 `tests/helpers/*-start.sh` 现在的统一写法（K73）。判据：单个夹具启动 < 3s，且 `ps-doctor.sh` 的 `leaked` 仍为 0。

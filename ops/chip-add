@@ -1,0 +1,203 @@
+#!/usr/bin/env bash
+# ops/chip-add - add one "chip" (tag) through a text input + Enter. v1.4 (T31, F22-1/2).
+# The editor's Enter handler is the part that silently fails in real pages: the keystroke can be
+# eaten while a suggestion dropdown is settling. One failed Enter is retried ONCE - and the retry
+# never retypes the same text on top of itself (that is the "TAG-00TAG-A1" gluing bug); it presses
+# Enter again while the input still holds the value, and only re-types after a ctrl+a.
+#
+# Dry-run by default; real injection needs --yes (same contract as ops/reveal, ops/select-option).
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-chip-add "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/chip-add (--hwnd H | --title REGEX) --input RE --list RE --value TEXT
+                    [--timeout MS] [--retries N] [--yes] [--dry-run]
+  Types TEXT into the element matching --input, presses Enter, and proves the chip landed:
+  a new element named exactly TEXT appears inside the container matching --list.
+  {ok,chipsBefore,chipsAfter,added,retried,chips:[...],inputCleared}
+  --retries N      how many extra Enter attempts are allowed (default 1, never more than 3)
+  A first Enter that does not land is retried once: if the input still holds the value the retry
+  presses Enter again, otherwise it re-types (ctrl+a first, so text is replaced, not appended).
+  chipsAfter must be exactly chipsBefore+1 and the added chip must be named exactly TEXT - a chip
+  that merely CONTAINS the value (TAG-00TAG-A1) is reported as glued and is an error, not success.
+  exit 0 ok | 2 arg | 3 env (no input / no list / text not entered / chip mismatch) | 4 guard | 5 exec
+  codes: ENV_NO_INPUT, ENV_NO_LIST, ENV_TEXT_NOT_ENTERED, ENV_CHIP_MISMATCH,
+         plus every winput code (injection refused/failed) passed through unchanged.
+EOF
+}
+
+HWND=0; TITLE=""; INPUT=""; LIST=""; VALUE=""; TMO=3000; RETRIES=1; REAL=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --input) INPUT="$2"; shift 2 ;;
+    --list) LIST="$2"; shift 2 ;;
+    --value) VALUE="$2"; shift 2 ;;
+    --timeout) TMO="$2"; shift 2 ;;
+    --retries) RETRIES="$2"; shift 2 ;;
+    --yes) REAL=1; shift ;;
+    --dry-run) REAL=0; shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[ "$HWND" != "0" ] || [ -n "$TITLE" ] || { echo 'need --hwnd or --title' >&2; exit 2; }
+[ -n "$INPUT" ] || { echo 'need --input RE (the text field)' >&2; exit 2; }
+[ -n "$LIST" ] || { echo 'need --list RE (the chip container)' >&2; exit 2; }
+[ -n "$VALUE" ] || { echo 'need --value TEXT (the chip label)' >&2; exit 2; }
+case "$TMO$RETRIES" in *[!0-9]*) echo '--timeout/--retries must be numbers' >&2; exit 2 ;; esac
+[ "$RETRIES" -le 3 ] || RETRIES=3
+
+op_pause_gate read
+H="$(op_resolve_hwnd "$HWND" "$TITLE")" || { printf '%s\n' "$H"; exit 3; }
+H="$(printf '%s' "$H" | tr -d '[:space:]')"
+
+wfind() {
+  local idx="${2:-0}"
+  bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$1" --index "$idx" --on-screen
+}
+
+INJ="$(wfind "$INPUT" 0 2>/dev/null)"; IRC=$?
+if [ "$IRC" -ne 0 ] || [ "$(printf '%s' "$INJ" | jq -r '.count // 0')" = "0" ]; then
+  WA_AUDIT_RESULT=ENV_NO_INPUT
+  jq -nc --arg h "$H" --arg re "$INPUT" '{ok:false,tool:"ops/chip-add",code:"ENV_NO_INPUT",message:("no on-screen element matched the input regex " + $re),hwnd:$h,input:$re,chipsBefore:0}'
+  exit 3
+fi
+LST="$(wfind "$LIST" 0 2>/dev/null)"; LRC=$?
+if [ "$LRC" -ne 0 ] || [ "$(printf '%s' "$LST" | jq -r '.count // 0')" = "0" ]; then
+  WA_AUDIT_RESULT=ENV_NO_LIST
+  jq -nc --arg h "$H" --arg re "$LIST" '{ok:false,tool:"ops/chip-add",code:"ENV_NO_LIST",message:("no on-screen element matched the list regex " + $re),hwnd:$h,list:$re,chipsBefore:0}'
+  exit 3
+fi
+
+INODE="$(printf '%s' "$INJ" | jq -c '.nodes[0]')"
+LNODE="$(printf '%s' "$LST" | jq -c '.nodes[0]')"
+IRECT="$(printf '%s' "$INODE" | jq -c '.rect')"
+LRECT="$(printf '%s' "$LNODE" | jq -c '.rect')"
+LX="$(printf '%s' "$LRECT" | jq -r '.x')"; LY="$(printf '%s' "$LRECT" | jq -r '.y')"
+LW="$(printf '%s' "$LRECT" | jq -r '.w')"; LH="$(printf '%s' "$LRECT" | jq -r '.h')"
+LNAME="$(printf '%s' "$LNODE" | jq -r '.name // ""')"
+LAID="$(printf '%s' "$LNODE" | jq -r '.aid // ""')"
+CX=$(( $(printf '%s' "$IRECT" | jq -r '.x') + $(printf '%s' "$IRECT" | jq -r '.w') / 2 ))
+CY=$(( $(printf '%s' "$IRECT" | jq -r '.y') + $(printf '%s' "$IRECT" | jq -r '.h') / 2 ))
+
+# chips = named, on-screen elements geometrically inside the list container, deduplicated by name.
+# Deduplication matters: WPF/Chromium report a ListItem and its inner Text with the same label,
+# and counting both would turn one added chip into chipsAfter = before+2.
+chips_now() {
+  local j
+  j="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name '.' --on-screen --limit 400 --depth 24 --max 4000 2>/dev/null)" || return 1
+  printf '%s' "$j" | jq -c --argjson lx "$LX" --argjson ly "$LY" --argjson lw "$LW" --argjson lh "$LH" \
+    --arg ln "$LNAME" --arg la "$LAID" '
+    [ (.nodes // [])[]
+      | select((.name // "") != "")
+      | select(((.rect.w // 0) > 2) and ((.rect.h // 0) > 2))
+      | select(.offscreen != true)
+      | select(.rect.x >= ($lx - 2) and .rect.y >= ($ly - 2)
+               and (.rect.x + .rect.w) <= ($lx + $lw + 2)
+               and (.rect.y + .rect.h) <= ($ly + $lh + 2))
+      | select(.name != $ln or ((.aid // "") != $la)) ]
+    | map(.name)
+    | reduce .[] as $n ([]; if index($n) then . else . + [$n] end)'
+}
+
+input_value() {
+  bash "$REPO_DIR/bin/wuia" --hwnd "$H" --find-name "$INPUT" --index 0 --get-value 2>/dev/null \
+    | jq -r '.value // ""' 2>/dev/null
+}
+
+CHIPS0="$(chips_now)" || CHIPS0='[]'
+CB="$(printf '%s' "$CHIPS0" | jq 'length')"
+
+if [ "$REAL" -eq 0 ]; then
+  WA_AUDIT_RESULT=dryrun
+  jq -nc --arg h "$H" --arg v "$VALUE" --argjson cb "$CB" --argjson chips "$CHIPS0" \
+    --argjson inode "$INODE" --argjson lnode "$LNODE" --argjson pt "{\"x\":$CX,\"y\":$CY}" \
+    '{ok:true,tool:"ops/chip-add",dry_run:true,plan:["focus","click-input","ctrl+a","type","enter","poll-chips"],hwnd:$h,value:$v,input:{name:$inode.name,rect:$inode.rect},list:{name:$lnode.name,rect:$lnode.rect},point:$pt,chipsBefore:$cb,chips:$chips}'
+  exit 0
+fi
+
+op_pause_gate input
+op_focus "$H" >/dev/null || {
+  FC="$OP_FOCUS_CODE"; [ -n "$FC" ] || FC=ENV_NOT_FOREGROUND
+  WA_AUDIT_RESULT="$FC"
+  jq -nc --arg h "$H" --arg c "$FC" --arg m "$OP_FOCUS_MSG" '{ok:false,tool:"ops/chip-add",code:$c,message:$m,hwnd:$h}'
+  exit 3
+}
+
+XJ="$(bash "$REPO_DIR/bin/winput" click "$CX" "$CY" --expect-hwnd "$H" --yes --focus 2>&1)"; XRC=$?
+if [ "$XRC" -ne 0 ]; then
+  XC="$(printf '%s' "$XJ" | jq -r '.code // empty' 2>/dev/null)"; [ -n "$XC" ] || XC=EXEC_CLICK_FAILED
+  WA_AUDIT_RESULT="$XC"
+  printf '%s' "$XJ" | jq -c --arg step click-input --arg h "$H" '. + {tool:"ops/chip-add",step:$step,hwnd:$h}' 2>/dev/null || jq -nc --arg c "$XC" '{ok:false,code:$c}'
+  exit "$XRC"
+fi
+
+# ctrl+a first: the input may already hold something (a previous failed attempt), and typing on
+# top of it is exactly how chips get glued.
+bash "$REPO_DIR/bin/winput" key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1 || true
+TJ="$(bash "$REPO_DIR/bin/winput" type --text "$VALUE" --expect-hwnd "$H" --verify contains --yes 2>&1)"; TRC=$?
+if [ "$TRC" -ne 0 ]; then
+  TC="$(printf '%s' "$TJ" | jq -r '.code // empty' 2>/dev/null)"; [ -n "$TC" ] || TC=EXEC_TYPE_FAILED
+  WA_AUDIT_RESULT="$TC"
+  printf '%s' "$TJ" | jq -c --arg step type --arg h "$H" --argjson cb "$CB" '. + {tool:"ops/chip-add",step:$step,hwnd:$h,chipsBefore:$cb}' 2>/dev/null || jq -nc --arg c "$TC" '{ok:false,code:$c}'
+  exit "$TRC"
+fi
+
+RETRIED=0; ATTEMPTS=0; CHIPS="$(chips_now)"; CA="$CB"; MODE="enter"
+while [ "$ATTEMPTS" -le "$RETRIES" ]; do
+  ATTEMPTS=$((ATTEMPTS+1))
+  if [ "$ATTEMPTS" -gt 1 ]; then
+    # retry: only re-type when the field no longer holds the value - otherwise a second Enter
+    RETRIED=$((RETRIED+1))
+    CUR="$(input_value)"
+    case "$CUR" in
+      *"$VALUE"*) MODE="enter-again" ;;
+      *)
+        MODE="retype"
+        bash "$REPO_DIR/bin/winput" key ctrl+a --expect-hwnd "$H" --yes >/dev/null 2>&1 || true
+        RJ="$(bash "$REPO_DIR/bin/winput" type --text "$VALUE" --expect-hwnd "$H" --verify contains --yes 2>&1)"; RRC=$?
+        if [ "$RRC" -ne 0 ]; then
+          RC_="$(printf '%s' "$RJ" | jq -r '.code // empty' 2>/dev/null)"; [ -n "$RC_" ] || RC_=EXEC_TYPE_FAILED
+          WA_AUDIT_RESULT="$RC_"
+          printf '%s' "$RJ" | jq -c --arg step retype --arg h "$H" '. + {tool:"ops/chip-add",step:$step,hwnd:$h,retried:true}' 2>/dev/null || jq -nc --arg c "$RC_" '{ok:false,code:$c}'
+          exit "$RRC"
+        fi ;;
+    esac
+  fi
+  bash "$REPO_DIR/bin/winput" key enter --expect-hwnd "$H" --yes >/dev/null 2>&1 || true
+  T0=$(date +%s%3N)
+  while :; do
+    CHIPS="$(chips_now)" || CHIPS='[]'
+    CA="$(printf '%s' "$CHIPS" | jq 'length')"
+    [ "$CA" -ge "$((CB+1))" ] && break
+    [ $(( $(date +%s%3N) - T0 )) -ge "$TMO" ] && break
+    sleep 0.12
+  done
+  [ "$CA" -ge "$((CB+1))" ] && break
+done
+
+CLEARED=false
+[ -z "$(input_value)" ] && CLEARED=true
+GLUED="$(printf '%s' "$CHIPS" | jq -c --arg v "$VALUE" '[.[] | select(. != $v and (contains($v)))]')"
+HASEXACT="$(printf '%s' "$CHIPS" | jq -r --arg v "$VALUE" 'if index($v) then "yes" else "no" end')"
+
+if [ "$CA" -ne "$((CB+1))" ] || [ "$HASEXACT" != "yes" ] || [ "$(printf '%s' "$GLUED" | jq 'length')" -gt 0 ]; then
+  WA_AUDIT_RESULT=ENV_CHIP_MISMATCH
+  jq -nc --arg h "$H" --arg v "$VALUE" --argjson cb "$CB" --argjson ca "${CA:-0}" --argjson chips "$CHIPS" \
+    --argjson glued "$GLUED" --argjson retried "$RETRIED" --argjson att "$ATTEMPTS" --argjson cleared "$CLEARED" --arg mode "$MODE" \
+    '{ok:false,tool:"ops/chip-add",code:"ENV_CHIP_MISMATCH",message:("chip did not land exactly once, expected one more chip named " + $v),hwnd:$h,value:$v,chipsBefore:$cb,chipsAfter:$ca,chips:$chips,glued:$glued,retried:$retried,attempts:$att,lastAttempt:$mode,inputCleared:$cleared}'
+  exit 3
+fi
+
+WA_AUDIT_RESULT=ok
+jq -nc --arg h "$H" --arg v "$VALUE" --argjson cb "$CB" --argjson ca "$CA" --argjson chips "$CHIPS" \
+  --argjson retried "$RETRIED" --argjson cleared "$CLEARED" --argjson inode "$INODE" --argjson lnode "$LNODE" \
+  --arg mode "$MODE" --argjson pt "{\"x\":$CX,\"y\":$CY}" \
+  '{ok:true,tool:"ops/chip-add",hwnd:$h,chipsBefore:$cb,chipsAfter:$ca,added:$v,retried:$retried,chips:$chips,inputCleared:$cleared,method:"click+ctrl+a+type+enter",input:{name:$inode.name,rect:$inode.rect},list:{name:$lnode.name,rect:$lnode.rect},point:$pt,lastAttempt:$mode}'
+exit 0

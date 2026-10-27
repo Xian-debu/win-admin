@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+# ops/wait-ready - wait until an element matching RE is really on screen. v1.4 (T31, F22-4).
+# "Present in the accessibility tree" is not "ready": a container that is still animating in
+# reports its children with a real rect while they are Collapsed (the select-option ghost bug,
+# T30). So readiness here means a named element with a non-empty rect that is not offscreen.
+set -uo pipefail
+. "$(dirname "$0")/../lib/common.sh"
+. "$(dirname "$0")/../lib/audit.sh"
+. "$(dirname "$0")/lib-ops.sh"
+wa_audit_init ops-wait-ready "$@"
+
+usage() {
+  cat <<'EOF'
+usage: ops/wait-ready (--hwnd H | --title REGEX) --require RE
+                      [--type RE] [--aid RE] [--timeout MS] [--interval MS]
+                      [--depth N] [--max N] [--no-on-screen] [--yes]
+  Polls the window until an element whose name matches RE is present AND has a real rect
+  (rect.w/h > 2, offscreen != true). Prints {ok,polls,elapsedMs,matched:{name,type,aid,rect}}.
+  A timeout is exit 3 ENV_TIMEOUT and carries polls/elapsedMs/lastCount - the caller can tell
+  "never appeared" (lastCount 0) from "appeared but never laid out" (lastCount > 0).
+  Read-only: no injection, so --yes is accepted and has nothing to confirm.
+  exit 0 ok | 2 arg | 3 env (no window / timeout) | 4 guard | 5 exec
+EOF
+}
+
+HWND=0; TITLE=""; REQ=""; TRE=""; AID=""; TMO=8000; IVL=150; DEPTH=20; MAX=4000; ONSCR=1
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) usage; exit 0 ;;
+    --hwnd) HWND="$2"; shift 2 ;;
+    --title) TITLE="$2"; shift 2 ;;
+    --require) REQ="$2"; shift 2 ;;
+    --type) TRE="$2"; shift 2 ;;
+    --aid) AID="$2"; shift 2 ;;
+    --timeout) TMO="$2"; shift 2 ;;
+    --interval) IVL="$2"; shift 2 ;;
+    --depth) DEPTH="$2"; shift 2 ;;
+    --max) MAX="$2"; shift 2 ;;
+    --no-on-screen) ONSCR=0; shift ;;
+    --yes) shift ;;
+    *) echo "unknown flag: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+[ "$HWND" != "0" ] || [ -n "$TITLE" ] || { echo 'need --hwnd or --title' >&2; exit 2; }
+[ -n "$REQ" ] || { echo 'need --require RE (the element name to wait for)' >&2; exit 2; }
+case "$TMO$IVL$DEPTH$MAX" in *[!0-9]*) echo 'numbers required' >&2; exit 2 ;; esac
+
+op_pause_gate read
+H="$(op_resolve_hwnd "$HWND" "$TITLE")" || { printf '%s\n' "$H"; exit 3; }
+H="$(printf '%s' "$H" | tr -d '[:space:]')"
+
+ARGS=(--find-name "$REQ" --limit 20 --depth "$DEPTH" --max "$MAX")
+[ "$ONSCR" -eq 1 ] && ARGS+=(--on-screen)
+[ -n "$TRE" ] && ARGS+=(--find-type "$TRE")
+[ -n "$AID" ] && ARGS+=(--find-aid "$AID")
+
+T0="$(date +%s%3N)"; POLLS=0; LAST=0; NODE=""
+while :; do
+  POLLS=$((POLLS+1))
+  J="$(bash "$REPO_DIR/bin/wuia" --hwnd "$H" "${ARGS[@]}" 2>/dev/null)" || J='{"count":0,"nodes":[]}'
+  LAST="$(printf '%s' "$J" | jq -r '.count // 0' 2>/dev/null)"
+  NODE="$(printf '%s' "$J" | jq -c '[ (.nodes // [])[]
+      | select((.rect.w // 0) > 2 and (.rect.h // 0) > 2)
+      | select(.offscreen != true) ][0] // empty' 2>/dev/null)"
+  [ -n "$NODE" ] && break
+  [ $(( $(date +%s%3N) - T0 )) -ge "$TMO" ] && break
+  sleep "$(awk -v m="$IVL" 'BEGIN{ printf "%.3f", m/1000 }')"
+done
+MS=$(( $(date +%s%3N) - T0 ))
+
+if [ -z "$NODE" ]; then
+  WA_AUDIT_RESULT=ENV_TIMEOUT
+  jq -nc --arg h "$H" --arg re "$REQ" --argjson p "$POLLS" --argjson ms "$MS" --argjson lc "$LAST" --argjson tmo "$TMO" \
+    '{ok:false,tool:"ops/wait-ready",code:"ENV_TIMEOUT",message:("never became ready: " + $re),hwnd:$h,require:$re,polls:$p,elapsedMs:$ms,lastCount:$lc,timeout:$tmo}'
+  exit 3
+fi
+
+WA_AUDIT_RESULT=ok
+jq -nc --arg h "$H" --arg re "$REQ" --argjson p "$POLLS" --argjson ms "$MS" --argjson lc "$LAST" --argjson node "$NODE" \
+  '{ok:true,tool:"ops/wait-ready",hwnd:$h,require:$re,polls:$p,elapsedMs:$ms,lastCount:$lc,matched:{name:$node.name,type:$node.type,aid:$node.aid,rect:$node.rect,offscreen:$node.offscreen}}'
+exit 0

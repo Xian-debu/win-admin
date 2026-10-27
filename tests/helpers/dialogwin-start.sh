@@ -10,7 +10,10 @@ WIN="${WINADMIN_APP_ROOT:-/mnt/c/Users/Public/win-admin}"
 cp "$(dirname "$0")/dialogwin.ps1" "$WIN/tmp/wa-dialogwin.ps1"
 rm -f "$WIN/tmp/dialogwin.json" "$WIN/tmp/dialogwin.err" "$WIN/tmp/dialogwin.out" "$WIN/tmp/dialogwin-error.txt" "$WIN/tmp/dialogwin-events.txt"
 CMD="Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-dialogwin.ps1")' -RedirectStandardError '$(wa_winpath "$WIN/tmp/dialogwin.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/dialogwin.out")' -PassThru | Select-Object -ExpandProperty Id"
-winps -t 30 "$CMD" | tail -1 > "$STATE_DIR/dialogwin.pid" 2>/dev/null
+# K73: fire and forget. winps cannot see EOF while the started process holds its
+# stdout pipe, so waiting for it costs the full winps timeout (observed 30s per
+# fixture start). The pid that owns the window is read from the fixture JSON below.
+( winps -t 25 "$CMD" >/dev/null 2>&1 & )
 for i in $(seq 1 80); do
   [ -s "$WIN/tmp/dialogwin.json" ] && jq -e . "$WIN/tmp/dialogwin.json" >/dev/null 2>&1 && break
   sleep 0.25

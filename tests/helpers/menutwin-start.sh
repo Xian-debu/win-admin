@@ -11,7 +11,10 @@ mkdir -p "$APP_ROOT/tmp"
 WIN="${WINADMIN_APP_ROOT:-/mnt/c/Users/Public/win-admin}"
 cp "$(dirname "$0")/menutwin.ps1" "$WIN/tmp/wa-menutwin.ps1"
 rm -f "$WIN/tmp/menutwin.json" "$WIN/tmp/menutwin.err" "$WIN/tmp/menutwin.out" "$WIN/tmp/menutwin-error.txt" "$WIN/tmp/menutwin-menu.txt" "$WIN/tmp/menutwin-scroll.txt"
-winps -t 30 "Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-menutwin.ps1")','-Title','$TITLE' -RedirectStandardError '$(wa_winpath "$WIN/tmp/menutwin.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/menutwin.out")' -PassThru | Select-Object -ExpandProperty Id" | tail -1 > "$STATE_DIR/menutwin.pid" 2>/dev/null
+# K73: fire and forget. winps cannot see EOF while the started process holds its
+# stdout pipe, so waiting for it costs the full winps timeout (observed 30s per
+# fixture start). The pid that owns the window is read from the fixture JSON below.
+( winps -t 25 "Start-Process -FilePath powershell.exe -ArgumentList '-NoLogo','-NoProfile','-STA','-NonInteractive','-WindowStyle','Hidden','-ExecutionPolicy','Bypass','-File','$(wa_winpath "$WIN/tmp/wa-menutwin.ps1")','-Title','$TITLE' -RedirectStandardError '$(wa_winpath "$WIN/tmp/menutwin.err")' -RedirectStandardOutput '$(wa_winpath "$WIN/tmp/menutwin.out")' -PassThru | Select-Object -ExpandProperty Id" >/dev/null 2>&1 & )
 for i in $(seq 1 80); do
   [ -s "$WIN/tmp/menutwin.json" ] && jq -e . "$WIN/tmp/menutwin.json" >/dev/null 2>&1 && break
   sleep 0.25
